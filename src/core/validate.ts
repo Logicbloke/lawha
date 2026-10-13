@@ -285,6 +285,8 @@ export async function receiveEnvelope(
   // seq <= head.seq with an unknown id: equivocation, and we hold the proof.
   const ours = await getMessageAt(db, env.board, env.author, env.dev, env.seq)
   if (!ours) return { status: 'invalid', reason: 'missing chain entry', accepted: [] }
+  // the same envelope stored meanwhile by a concurrent receive: not a fork
+  if (ours.id === id) return { status: 'duplicate', accepted: [] }
   const fork: ForkRecord = {
     board: env.board,
     author: env.author,

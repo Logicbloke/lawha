@@ -70,6 +70,21 @@ describe('receive pipeline', () => {
   })
 })
 
+describe('concurrent delivery', () => {
+  it('the same envelope from two peers at once is a duplicate, never a fork', async () => {
+    const db = await openLawhaDb(uniqueDbName())
+    const o = new Peer('o')
+    const { id, items } = createBoardItems(o.id, { kind: 'board', ws: null, name: 'B', myName: '', columns: ['A', 'B', 'C'] })
+    const msgs = o.write(items).map(toWire)
+    await Promise.all([
+      (async () => { for (const m of msgs) await receiveEnvelope(db, m) })(),
+      (async () => { for (const m of msgs) await receiveEnvelope(db, m) })(),
+    ])
+    expect(await getBoardForks(db, id)).toHaveLength(0)
+    expect(await getBoardMessages(db, id)).toHaveLength(msgs.length)
+  })
+})
+
 describe('identity', () => {
   it('round-trips a backup and accepts Shabaka backups of the same key', () => {
     const me = generateIdentity()

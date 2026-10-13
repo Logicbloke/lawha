@@ -103,7 +103,10 @@ export class Engine {
       isKnownAuthor: (board, author) => this.boards.get(board)?.known.has(author) ?? false,
       onIngested: (board, msgs) => this.bg(this.ingested(board, msgs)),
       onFork: (board) => this.bg(this.reloadForks(board)),
-      onOrphans: () => undefined,
+      onOrphans: (board) => {
+        const st = this.boards.get(board)
+        if (st) this.bg(this.promoteOrphans(st))
+      },
       onPeerAuthed: (board, pub, member) => this.events.emit('peer-authed', { board, pub, member }),
     }
     this.sync = new SyncManager(host)
@@ -273,7 +276,14 @@ export class Engine {
   private async ingested(board: string, msgs: StoredMessage[]): Promise<void> {
     const st = this.boards.get(board)
     if (!st) return
-    for (const m of msgs) st.msgs.set(m.id, m)
+    for (const m of msgs) {
+      st.msgs.set(m.id, m)
+      // accept the chains these name right away, not after the debounced fold
+      if (m.type !== 'acl') continue
+      const c = m.content as AclContent
+      if (c.act === 'genesis' && boardIdFor(m.author, c.nonce) === board) st.known.add(m.author)
+      if (c.act === 'set-role' && st.known.has(m.author)) st.known.add(c.target)
+    }
     st.dirty = true
     this.schedule(st)
   }

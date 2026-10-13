@@ -295,7 +295,21 @@ export class SyncManager {
     return c.act === 'genesis' && typeof c.nonce === 'string' && isB64(env.author, B64_32) && boardIdFor(env.author, c.nonce) === board
   }
 
-  private async handleMsgs(peer: PeerState, p: unknown): Promise<void> {
+  /** Batches for one board are processed one at a time: chain checks read-then-write. */
+  private queues = new Map<string, Promise<void>>()
+
+  private handleMsgs(peer: PeerState, p: unknown): Promise<void> {
+    const board = peer.ch.board
+    const next = (this.queues.get(board) ?? Promise.resolve()).then(() => this.processMsgs(peer, p))
+    const settled = next.catch(() => undefined)
+    this.queues.set(board, settled)
+    void settled.then(() => {
+      if (this.queues.get(board) === settled) this.queues.delete(board)
+    })
+    return next
+  }
+
+  private async processMsgs(peer: PeerState, p: unknown): Promise<void> {
     if (!isObj(p) || !Array.isArray(p.batch) || p.batch.length > BATCH_SIZE * 2) return
     const board = peer.ch.board
     const accepted: StoredMessage[] = []
@@ -327,12 +341,14 @@ export class SyncManager {
         continue
       }
       accepted.push(...r.accepted)
-      for (const m of r.accepted) {
-        if (m.type !== 'acl') continue
-        const c = m.content as AclContent
-        if (c.act === 'genesis' && this.isGenesisFor(board, m)) introduced.add(m.author)
-        if (c.act === 'set-role' && this.host.isKnownAuthor(board, m.author)) introduced.add(c.target)
-        if (c.act === 'set-role' && introduced.has(m.author)) introduced.add(c.target)
+      // a verified genesis or set-role names authors whose chains we want,
+      // even when we already had it (duplicate) or it waits on a gap (pending)
+      if (env.type === 'acl') {
+        const c = env.content as AclContent
+        if (genesis) introduced.add(env.author)
+        if (c.act === 'set-role' && (introduced.has(env.author) || this.host.isKnownAuthor(board, env.author))) {
+          introduced.add(c.target)
+        }
       }
       if (r.gap) {
         const k = `${r.gap.author}.${r.gap.dev}`
