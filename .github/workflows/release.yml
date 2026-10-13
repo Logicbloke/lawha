@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run build # BASE_PATH defaults to /, right for local serving
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+      - run: bun run build:single
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+      - name: Package artifacts
+        run: |
+          cd dist && zip -r ../lawha-static.zip . && cd ..
+          cp dist-single/lawha.html lawha.html
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Lawha $GITHUB_REF_NAME" \
+            --notes "**lawha.html** — download and double-click. Runs entirely in your browser, no installation.
+
+          **lawha-static.zip** — unzip and serve with any static file server (e.g. \`python3 -m http.server 8080\`)." \
+            lawha.html lawha-static.zip
