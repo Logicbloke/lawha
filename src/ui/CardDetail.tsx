@@ -17,16 +17,25 @@ interface Props {
 /** Modal dialog with focus kept inside and Escape to close. */
 export function Modal({ label, onClose, children, wide }: { label: string; onClose(): void; children: React.ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
+  // callers pass inline closures: read the latest one through a ref so the
+  // effect below runs once per open, not on every parent render (re-running it
+  // pulled focus out of the field being typed in)
+  const closeRef = useRef(onClose)
   useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null
-    ref.current?.focus()
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    closeRef.current = onClose
+  })
+  // what had focus before opening; captured at first render, before an
+  // autoFocus field inside takes it
+  const [prev] = useState(() => document.activeElement as HTMLElement | null)
+  useEffect(() => {
+    if (!ref.current?.contains(document.activeElement)) ref.current?.focus()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current()
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('keydown', onKey)
       prev?.focus?.()
     }
-  }, [onClose])
+  }, [prev])
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div

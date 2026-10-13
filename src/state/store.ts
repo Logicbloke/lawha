@@ -260,7 +260,17 @@ export function setOnReady(fn: (engine: Engine) => void): void {
 
 async function ready(identity: Identity): Promise<void> {
   engine = new Engine(getDb, identity, dev)
-  const bump = () => useApp.setState((s) => ({ version: s.version + 1 }))
+  // deferred: engine.view() may refold (and emit) while a component renders,
+  // and React forbids updating the store mid-render; also coalesces bursts
+  let bumpQueued = false
+  const bump = () => {
+    if (bumpQueued) return
+    bumpQueued = true
+    queueMicrotask(() => {
+      bumpQueued = false
+      useApp.setState((s) => ({ version: s.version + 1 }))
+    })
+  }
   engine.events.on('board-changed', bump)
   engine.events.on('boards-changed', bump)
   engine.events.on('peer-authed', ({ board, pub, member }) => {
