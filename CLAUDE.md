@@ -48,7 +48,8 @@ Strict layering: `src/core/` has **no React imports**; `src/state/` bridges core
 ## Invariants to respect
 
 - `canonical.ts` and the envelope shape are the signing format; changing them breaks every signature. App id is `lawha-v1` (net.ts). Op kinds and fields are protocol too (`opSchemaError`).
-- Derived state must be a pure function of the stored envelope set (plus identity for decryption). Never make validity depend on arrival order, wall-clock time or local state.
+- Derived state must be a pure function of the stored envelope set (plus identity for decryption). Never make validity depend on arrival order, wall-clock time or local state, nor on browser APIs whose behaviour differs between engines (`new URL()` does: hence the `isHttpUrl` pattern in board.ts).
+- Card fields: `field.set` is admin-only and rewritten whole (state edits go through `editField`'s queue); its type is fixed by the first write. `entry.set` values are checked against the field type in the fold, never trusted from the op.
 - ACL rules (acl.ts header comment) are security-critical: rank rule, `roleAt` frontier/tie-break, `upTo` cutoffs, owner events always valid. Any change needs attack-scenario tests in `tests/acl.test.ts`.
 - One writer per install (Web Locks in `state/store.ts`); `dev` ids are never exported.
 - Batches for a board are processed sequentially in sync (`handleMsgs` queue); receive must treat a concurrently stored identical envelope as a duplicate, never a fork.

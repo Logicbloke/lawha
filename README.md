@@ -26,6 +26,9 @@ A Shabaka key backup works here too and keeps the same identity.
   workspaces**.
 - Columns you add, rename, reorder, archive, with work-in-progress limits.
 - Cards with descriptions, labels, assignees, due dates and comments.
+- **Card fields**: admins define fields per board (text, number, link, date,
+  choice list, checkbox, person); on a card you add only the ones you need,
+  the same field as many times as you like.
 - Drag cards between columns with mouse, touch (long-press) or keyboard
   (space, arrows, space). Select several (checkbox, ctrl/cmd or shift-click)
   and drag them together, or **move them to another board**.
@@ -64,7 +67,10 @@ lying about time.
 **Board state.** The board is a deterministic fold over all members' logs:
 each field is last-writer-wins by the derived clock, a card's column and
 position are one register (a card is never in two columns), and order within
-a column uses fractional index keys. Every peer holding the same envelopes
+a column uses fractional index keys. Card field values are entries of their
+own, so two people adding values to one card never overwrite each other; a
+value that does not fit its field's type (a `javascript:` link, a removed
+choice) shows as empty. Every peer holding the same envelopes
 computes the same board, whatever order they arrived in.
 
 **Permissions.** Owner > admin > editor > viewer. An actor may change a

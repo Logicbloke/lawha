@@ -1156,6 +1156,231 @@ textarea.detail-title:hover {
   border-bottom: 1px solid var(--line);
 }
 
+/* ---- card fields ---- */
+
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.entry {
+  display: grid;
+  grid-template-columns: minmax(5rem, 9rem) minmax(0, 1fr) 1.9rem 1.9rem;
+  align-items: center;
+  gap: 0.2rem 0.5rem;
+}
+.entry-key {
+  grid-area: 1 / 1;
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.entry-value {
+  grid-area: 1 / 2;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.entry-value.view {
+  grid-column: 2 / -1;
+}
+.entry-value > input:not([type='checkbox']),
+.entry-value > select {
+  flex: 1;
+  min-width: 0;
+}
+.entry-value input[type='checkbox'] {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+}
+.entry-aside {
+  grid-area: 1 / 3;
+  display: grid;
+  place-items: center;
+}
+.entry-remove {
+  grid-area: 1 / 4;
+  border: 0;
+  background: none;
+  padding: 0.45rem;
+  color: var(--faint);
+}
+.entry-remove:hover:not(:disabled) {
+  background: none;
+  color: var(--danger);
+}
+.entry-error {
+  grid-area: 2 / 2 / auto / -1;
+  margin: 0;
+  font-size: 0.82rem;
+}
+.entry-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--c);
+}
+.entry-text,
+.entry-link {
+  overflow-wrap: anywhere;
+}
+.entry-link {
+  color: var(--focus);
+}
+.entry-open {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: var(--r-ctl);
+  color: var(--muted);
+}
+.entry-open:hover {
+  background: var(--slate);
+  color: var(--text);
+}
+details.menu.add-entry {
+  align-self: flex-start;
+}
+details.menu.add-entry > summary {
+  width: auto;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.9rem;
+}
+/* in the flow, not floating: the card dialog scrolls and would clip a popup */
+.add-entry .menu-pop {
+  position: static;
+  margin-top: 0.3rem;
+  max-width: 22rem;
+  box-shadow: none;
+}
+.add-entry .menu-pop button {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.menu-note {
+  color: var(--faint);
+  font-size: 0.82rem;
+}
+
+.field-defs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.field-def {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.field-def-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6.5rem auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+.field-type {
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.field-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.option-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  padding-block: 0.1rem;
+  padding-inline: 0.4rem 0.15rem;
+}
+.option-color {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c);
+}
+.option-color:hover:not(:disabled) {
+  background: var(--c);
+  box-shadow: 0 0 0 2px var(--text);
+}
+.option-remove {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  padding: 0.25rem;
+  color: var(--muted);
+}
+.option-remove:hover:not(:disabled) {
+  background: none;
+  color: var(--danger);
+}
+.new-option {
+  display: flex;
+  gap: 0.35rem;
+}
+.new-option input {
+  width: 9rem;
+}
+.new-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.new-field input {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .entry {
+    grid-template-columns: minmax(0, 1fr) 1.9rem 1.9rem;
+  }
+  .entry-key {
+    grid-area: 1 / 1 / auto / -1;
+  }
+  .entry-value {
+    grid-area: 2 / 1;
+  }
+  .entry-value.view {
+    grid-column: 1 / -1;
+  }
+  .entry-aside {
+    grid-area: 2 / 2;
+  }
+  .entry-remove {
+    grid-area: 2 / 3;
+  }
+  .entry-error {
+    grid-area: 3 / 1 / auto / -1;
+  }
+}
+
 /* ---- members, people, join ---- */
 
 .members-head {

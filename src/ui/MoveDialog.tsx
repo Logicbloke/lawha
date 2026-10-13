@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { BoardView } from '../core/board'
 import { RANK } from '../core/types'
 import { getEngine } from '../state/store'
-import { moveCards, moveCardsToBoard } from '../state/actions'
+import { fieldsLostOnMove, moveCards, moveCardsToBoard } from '../state/actions'
 import { Modal } from './CardDetail'
 import { useT } from './i18n'
 
@@ -25,6 +25,7 @@ export function MoveDialog({ view, ids, onClose }: { view: BoardView; ids: strin
   const [col, setCol] = useState(target.columns[0]?.id ?? '')
   const colId = target.columns.some((c) => c.id === col) ? col : (target.columns[0]?.id ?? '')
   const [busy, setBusy] = useState(false)
+  const lost = board === view.id ? 0 : fieldsLostOnMove(view, target, ids)
 
   return (
     <Modal label={t('moveNCards', { n: ids.length })} onClose={() => onClose(false)}>
@@ -64,6 +65,9 @@ export function MoveDialog({ view, ids, onClose }: { view: BoardView; ids: strin
           </select>
         </label>
         {board !== view.id && <p className="hint">{t('moveOtherBoardHint')}</p>}
+        {lost > 0 && (
+          <p className="notice warn">{t('fieldsLostOnMove', { n: lost, board: target.name || t('untitledBoard') })}</p>
+        )}
         <div className="row">
           <button className="primary" disabled={busy || !colId}>
             {t('move')}

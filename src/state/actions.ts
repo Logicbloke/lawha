@@ -2,6 +2,7 @@ import { B64_32 } from '../core/b64'
 import { isB64 } from '../core/validate'
 import {
   ActionError,
+  carryFields,
   createBoardItems,
   leaveItem,
   moveCardsItems,
@@ -14,7 +15,17 @@ import {
   setRoleItem,
 } from '../core/actions'
 import { MAX_OP_JSON, opJsonSize } from '../core/boardcrypto'
-import { positionsAt, type BoardOp, type BoardView, type LabelColor } from '../core/board'
+import {
+  LABEL_COLORS,
+  positionsAt,
+  type BoardOp,
+  type BoardView,
+  type Card,
+  type FieldDef,
+  type FieldType,
+  type FieldValue,
+  type LabelColor,
+} from '../core/board'
 import { deleteContact, getContacts, putContact } from '../core/db'
 import type { ContactRecord, Role } from '../core/types'
 import { getDb, getEngine, me, navigate, setWorkspace, toast, useApp } from './store'
@@ -168,6 +179,12 @@ export function moveCardsToBoard(
   })
 }
 
+/** How many field values of `ids` would stay behind if moved to `dst` now. */
+export function fieldsLostOnMove(src: BoardView, dst: BoardView, ids: string[]): number {
+  const cards = ids.map((id) => src.cards.get(id)).filter((c): c is Card => c !== undefined && c.movedTo === null)
+  return carryFields(src, dst, cards).dropped
+}
+
 export const addComment = (board: string, card: string, text: string) =>
   run(() => op(board, { k: 'comment.add', id: newEntityId(), card, text, imported: null }))
 
@@ -180,6 +197,61 @@ export function setLabel(
     await op(board, { k: 'label.set', id, name: label.name, color: label.color, archived: label.archived ?? false })
     return id
   })
+}
+
+// ---- card fields ----
+
+export function createField(board: string, name: string, type: FieldType): Promise<string | undefined> {
+  return run(async () => {
+    const id = newEntityId()
+    await op(board, { k: 'field.set', id, name, type, options: [], archived: false })
+    return id
+  })
+}
+
+let fieldEdits: Promise<unknown> = Promise.resolve()
+
+/**
+ * A field template is rewritten whole, so edits run one at a time against its
+ * latest version: two quick edits (adding two choices) never undo each other.
+ */
+export function editField(board: string, id: string, fn: (def: FieldDef) => FieldDef): Promise<void | undefined> {
+  const next = fieldEdits.then(() =>
+    run(async () => {
+      const def = view(board).fields.get(id)
+      if (!def) throw new ActionError('no such field')
+      await op(board, { k: 'field.set', ...fn(def) })
+    }),
+  )
+  fieldEdits = next
+  return next
+}
+
+export function addFieldOption(board: string, id: string, name: string): Promise<void | undefined> {
+  return editField(board, id, (def) => ({
+    ...def,
+    options: [...def.options, { id: newEntityId(), name, color: LABEL_COLORS[(def.options.length + 6) % LABEL_COLORS.length]! }],
+  }))
+}
+
+export const newId = newEntityId
+
+/** Add a value to a card (no `id`) or change / remove an existing one. */
+export function setEntry(
+  board: string,
+  card: string,
+  entry: { id?: string; field: string; value: FieldValue; removed?: boolean },
+): Promise<void | undefined> {
+  return run(() =>
+    op(board, {
+      k: 'entry.set',
+      id: entry.id ?? newEntityId(),
+      card,
+      field: entry.field,
+      value: entry.value,
+      removed: entry.removed ?? false,
+    }),
+  )
 }
 
 // ---- members ----

@@ -76,6 +76,11 @@ export function formatDue(due: string, locale: string): string {
   return new Date(y!, m! - 1, d!).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 }
 
+export function formatDate(date: string, locale: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(y!, m! - 1, d!).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 export function isOverdue(due: string, now: number): boolean {
   const [y, m, d] = due.split('-').map(Number)
   return new Date(y!, m! - 1, d! + 1).getTime() < now

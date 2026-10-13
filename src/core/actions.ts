@@ -12,6 +12,7 @@ import {
   type BoardOp,
   type BoardView,
   type Card,
+  type FieldDef,
 } from './board'
 import type { AppendItem } from './log'
 import { MAX_CARRIED_KEYS } from './validate'
@@ -246,7 +247,8 @@ export interface CrossMove {
 /**
  * Move cards to another board: create them there (deterministic ids, so two
  * people moving the same card to the same board end up with one card), carry
- * labels by name and comments as imported snapshots, then stub them out in
+ * labels by name, field values (see carryFields) and comments as imported
+ * snapshots, then stub them out in
  * the source. One batch: all of it lands or none does.
  */
 export function moveCardsToBoardItems(
@@ -312,11 +314,59 @@ export function moveCardsToBoardItems(
     }
   })
 
-  const items = [...targetOps, ...commentOps].map((op) => opItem(dst, op))
+  const { ops: fieldOps } = carryFields(src, dst, cards)
+  const items = [...targetOps, ...fieldOps, ...commentOps].map((op) => opItem(dst, op))
   for (const part of chunk(cards, MAX_MOVES)) {
     items.push(
       opItem(src, { k: 'card.moveOut', ids: part.map((c) => c.id), to: dst.id, vers: part.map((c) => c.version) }),
     )
   }
   return { items, mapping }
+}
+
+/**
+ * Field values for cards moved from `src` to `dst`. A field matches by type
+ * and name (case-insensitive), a choice by option name. An admin of `dst`
+ * gets missing fields created there; anyone else leaves those values behind,
+ * counted in `dropped` so the UI can say so before the move.
+ */
+export function carryFields(src: BoardView, dst: BoardView, cards: Card[]): { ops: BoardOp[]; dropped: number } {
+  const canDefine = RANK[dst.myRole] >= RANK.admin
+  const keyOf = (f: FieldDef) => `${f.type}:${f.name.trim().toLowerCase()}`
+  const dstByKey = new Map<string, FieldDef>()
+  for (const f of dst.fields.values()) if (!f.archived && !dstByKey.has(keyOf(f))) dstByKey.set(keyOf(f), f)
+
+  const ops: BoardOp[] = []
+  let dropped = 0
+  for (const card of cards) {
+    const newCard = movedCardId(src.id, card.id, dst.id)
+    for (const e of card.fields) {
+      const f = src.fields.get(e.field)
+      if (!f) continue
+      let target = dstByKey.get(keyOf(f))
+      if (!target && canDefine) {
+        // derived id so two people moving cards with this field create it once,
+        // unless that id is taken by a copy someone has since renamed
+        const id = dst.fields.has(movedCardId(src.id, f.id, dst.id)) ? newEntityId() : movedCardId(src.id, f.id, dst.id)
+        target = { id, name: f.name, type: f.type, options: f.options, archived: false }
+        dstByKey.set(keyOf(f), target)
+        ops.push({ k: 'field.set', ...target })
+      }
+      if (!target) {
+        dropped++
+        continue
+      }
+      let value = e.value
+      if (f.type === 'choice' && value !== null) {
+        const name = f.options.find((o) => o.id === value)?.name.toLowerCase()
+        value = target.options.find((o) => o.name.toLowerCase() === name)?.id ?? null
+        if (value === null) {
+          dropped++
+          continue
+        }
+      }
+      ops.push({ k: 'entry.set', id: movedCardId(src.id, e.id, dst.id), card: newCard, field: target.id, value, removed: false })
+    }
+  }
+  return { ops, dropped }
 }

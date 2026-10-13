@@ -78,7 +78,10 @@ export function CardItem({ card, view, selected, selecting, disabled, onOpen, on
         className="card-body"
         {...attributes}
         {...listeners}
-        aria-roledescription={t('dndCard')}
+        // a viewer cannot drag the card but still opens it: not "disabled"
+        aria-disabled={undefined}
+        aria-describedby={disabled ? undefined : attributes['aria-describedby']}
+        aria-roledescription={disabled ? undefined : t('dndCard')}
         aria-pressed={selecting ? selected : undefined}
         onClick={(e) => {
           if (justDragged()) return

@@ -4,12 +4,13 @@ import { RANK } from '../core/types'
 import { archiveColumn, leaveBoard, setMyName, updateCard } from '../state/actions'
 import { me } from '../state/store'
 import { Modal } from './CardDetail'
+import { FieldSettings } from './FieldSettings'
 import { useT } from './i18n'
 
 /** Board-level actions: rename, your display name here, archive, leave. */
 export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): void }) {
   const t = useT()
-  const [panel, setPanel] = useState<'name' | 'archive' | null>(null)
+  const [panel, setPanel] = useState<'name' | 'fields' | 'archive' | null>(null)
   const [name, setName] = useState(view.profiles.get(me().pub) ?? '')
   const close = (e: React.MouseEvent) => (e.currentTarget.closest('details') as HTMLDetailsElement).removeAttribute('open')
   const isAdmin = RANK[view.myRole] >= RANK.admin
@@ -29,6 +30,7 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
           {isAdmin && (
             <button onClick={(e) => (close(e), onRename())}>{t('renameBoard')}</button>
           )}
+          {isAdmin && <button onClick={(e) => (close(e), setPanel('fields'))}>{t('cardFields')}</button>}
           <button onClick={(e) => (close(e), setPanel('name'))}>{t('myNameHere')}</button>
           <button onClick={(e) => (close(e), setPanel('archive'))}>
             {t('archivedItems', { n: view.archivedCards.length + view.archivedColumns.length })}
@@ -62,6 +64,12 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
             <input autoFocus value={name} maxLength={80} aria-label={t('displayName')} onChange={(e) => setName(e.target.value)} />
             <button className="primary">{t('save')}</button>
           </form>
+        </Modal>
+      )}
+
+      {panel === 'fields' && (
+        <Modal label={t('cardFields')} onClose={() => setPanel(null)}>
+          <FieldSettings view={view} onDone={() => setPanel(null)} />
         </Modal>
       )}
 

@@ -4,6 +4,7 @@ import { RANK } from '../core/types'
 import { getEngine, navigate, useApp } from '../state/store'
 import { addComment, setLabel, updateCard } from '../state/actions'
 import { formatRelative, shortKey, useNow } from './hooks'
+import { CardFields } from './CardFields'
 import { Identicon } from './Identicon'
 import { useT } from './i18n'
 
@@ -128,6 +129,8 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
           ) : (
             <p className="detail-desc-text">{card.desc || t('noDescription')}</p>
           )}
+
+          <CardFields view={view} card={card} canEdit={canEdit} />
 
           <h3>{t('comments')}</h3>
           <ul className="comments-list">

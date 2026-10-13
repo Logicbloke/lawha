@@ -37,6 +37,20 @@ export const MAX_POS = 64
 export const RENORMALIZE_POS = 48
 export const LABEL_COLORS = ['gray', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink'] as const
 export type LabelColor = (typeof LABEL_COLORS)[number]
+export const MAX_FIELD_TEXT = 1000
+export const MAX_URL = 2000
+export const MAX_OPTIONS = 50
+export const FIELD_TYPES = ['text', 'number', 'url', 'date', 'choice', 'checkbox', 'person'] as const
+export type FieldType = (typeof FIELD_TYPES)[number]
+
+export interface FieldOption {
+  id: string
+  name: string
+  color: LabelColor
+}
+
+/** null is an entry with no value yet (or one its field's type no longer accepts) */
+export type FieldValue = string | number | boolean | null
 
 export interface Move {
   id: string
@@ -82,12 +96,16 @@ export type BoardOp =
       text: string
       imported: { author: string; name: string; ts: number } | null
     }
+  /** a field template cards can use; its type is fixed by the first write */
+  | { k: 'field.set'; id: string; name: string; type: FieldType; options: FieldOption[]; archived: boolean }
+  /** one value on a card: a card may hold any number of entries of the same field */
+  | { k: 'entry.set'; id: string; card: string; field: string; value: FieldValue; removed: boolean }
 
 export type BoardOpKind = BoardOp['k']
 
 export function requiredRank(op: BoardOp): number {
   if (op.k === 'profile.set') return RANK.viewer
-  if (op.k === 'board.update') return RANK.admin
+  if (op.k === 'board.update' || op.k === 'field.set') return RANK.admin
   return RANK.editor
 }
 
@@ -101,6 +119,55 @@ const isBool = (b: unknown): b is boolean => typeof b === 'boolean'
 const isDue = (d: unknown): boolean => d === null || (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
 const isIdList = (x: unknown, check: (s: unknown) => boolean): boolean =>
   Array.isArray(x) && x.length <= MAX_REFS && x.every(check) && new Set(x).size === x.length
+
+const isOptions = (x: unknown): boolean =>
+  Array.isArray(x) &&
+  x.length <= MAX_OPTIONS &&
+  x.every(
+    (o: unknown) =>
+      typeof o === 'object' &&
+      o !== null &&
+      allowedKeys(o as Record<string, unknown>, ['id', 'name', 'color']) &&
+      isId((o as FieldOption).id) &&
+      isStr((o as FieldOption).name, MAX_NAME, 1) &&
+      LABEL_COLORS.includes((o as FieldOption).color),
+  ) &&
+  new Set(x.map((o: FieldOption) => o.id)).size === x.length
+const isFieldValue = (v: unknown): boolean =>
+  v === null || isBool(v) || (typeof v === 'number' && Number.isFinite(v)) || isStr(v, MAX_URL)
+
+/**
+ * An http(s) link with a host, and no whitespace, control characters or
+ * `user@` part (a phishing staple). A pattern, not `new URL()`: browsers'
+ * parsers disagree (Chromium accepts spaces in a host), and validity feeds
+ * the fold, which every peer must compute alike.
+ */
+const HTTP_URL = /^https?:\/\/[^\s\x00-\x1f\x7f/?#@\\<>"'`{}|^]+(?:[/?#][^\s\x00-\x1f\x7f<>"]*)?$/i
+
+export function isHttpUrl(s: string): boolean {
+  return HTTP_URL.test(s)
+}
+
+/** Whether `v` is a value of `def`'s type. Decided in the fold, where the type is known. */
+export function fieldValueOk(def: FieldDef, v: FieldValue): boolean {
+  if (v === null) return true
+  switch (def.type) {
+    case 'text':
+      return isStr(v, MAX_FIELD_TEXT, 1)
+    case 'number':
+      return typeof v === 'number'
+    case 'url':
+      return isStr(v, MAX_URL, 1) && isHttpUrl(v)
+    case 'date':
+      return typeof v === 'string' && isDue(v)
+    case 'choice':
+      return typeof v === 'string' && def.options.some((o) => o.id === v)
+    case 'checkbox':
+      return isBool(v)
+    case 'person':
+      return isPub(v)
+  }
+}
 
 export function isPos(p: unknown): p is string {
   if (typeof p !== 'string' || p.length === 0 || p.length > MAX_POS) return false
@@ -225,6 +292,24 @@ export function opSchemaError(x: unknown): string | null {
         ? null
         : 'bad comment.add'
     }
+    case 'field.set':
+      return allowedKeys(o, ['k', 'id', 'name', 'type', 'options', 'archived']) &&
+        isId(o.id) &&
+        isStr(o.name, MAX_NAME, 1) &&
+        FIELD_TYPES.includes(o.type as FieldType) &&
+        isOptions(o.options) &&
+        isBool(o.archived)
+        ? null
+        : 'bad field.set'
+    case 'entry.set':
+      return allowedKeys(o, ['k', 'id', 'card', 'field', 'value', 'removed']) &&
+        isId(o.id) &&
+        isId(o.card) &&
+        isId(o.field) &&
+        isFieldValue(o.value) &&
+        isBool(o.removed)
+        ? null
+        : 'bad entry.set'
     default:
       return 'unknown op'
   }
@@ -245,6 +330,20 @@ export interface Label {
   name: string
   color: LabelColor
   archived: boolean
+}
+
+export interface FieldDef {
+  id: string
+  name: string
+  type: FieldType
+  options: FieldOption[]
+  archived: boolean
+}
+
+export interface FieldEntry {
+  id: string
+  field: string
+  value: FieldValue
 }
 
 export interface Comment {
@@ -273,6 +372,8 @@ export interface Card {
   createdAt: number
   updatedAt: number
   comments: Comment[]
+  /** values of live fields, in the order they were added */
+  fields: FieldEntry[]
   /** someone edited the card in a way the mover did not see; that edit is not in the copy */
   editedAfterMove: boolean
   /** hash of the set of edit envelopes applied to this card */
@@ -321,6 +422,8 @@ export interface BoardView {
   archivedCards: Card[]
   movedOut: Card[]
   labels: Map<string, Label>
+  /** field templates, archived ones included */
+  fields: Map<string, FieldDef>
   members: Member[]
   profiles: Map<string, string>
   myRole: RoleOrNone
@@ -519,6 +622,8 @@ export function computeBoard(
   const columns = new Map<string, Column>()
   const cards = new Map<string, Card & { created: boolean; movedVer: string; edits: string[] }>()
   const comments = new Map<string, Comment>()
+  const fields = new Map<string, FieldDef>()
+  const entries = new Map<string, { id: string; card: string; field: string; value: FieldValue; removed: boolean }>()
 
   const cardStub = (id: string, a: Applied) => {
     let c = cards.get(id)
@@ -539,6 +644,7 @@ export function computeBoard(
         createdAt: a.m.ts,
         updatedAt: a.m.ts,
         comments: [],
+        fields: [],
         editedAfterMove: false,
         version: '',
         created: false,
@@ -635,7 +741,28 @@ export function computeBoard(
           })
         }
         break
+      case 'field.set': {
+        // the type stays what it was first written as, so existing values keep their meaning
+        const type = fields.get(op.id)?.type ?? op.type
+        fields.set(op.id, { id: op.id, name: op.name, type, options: op.options, archived: op.archived })
+        break
+      }
+      case 'entry.set': {
+        // an entry belongs to one card and one field for good; Map order is first-write order
+        const e = entries.get(op.id)
+        if (e && (e.card !== op.card || e.field !== op.field)) break
+        entries.set(op.id, { id: op.id, card: op.card, field: op.field, value: op.value, removed: op.removed })
+        cardStub(op.card, a).edits.push(a.m.id)
+        break
+      }
     }
+  }
+
+  for (const e of entries.values()) {
+    const def = fields.get(e.field)
+    const c = cards.get(e.card)
+    if (e.removed || !def || def.archived || !c) continue
+    c.fields.push({ id: e.id, field: e.field, value: fieldValueOk(def, e.value) ? e.value : null })
   }
 
   for (const cm of comments.values()) {
@@ -692,6 +819,7 @@ export function computeBoard(
     archivedCards,
     movedOut,
     labels,
+    fields,
     members,
     profiles,
     myRole: res.roles.get(me.pub) ?? 'none',
