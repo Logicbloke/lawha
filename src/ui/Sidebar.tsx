@@ -103,7 +103,7 @@ export function Sidebar() {
                   onClick={() => navigate({ name: 'board', id })}
                   aria-current={openId === id ? 'page' : undefined}
                 >
-                  <span className="side-board-name">{name || t('untitledBoard')}</span>
+                  <span className="side-board-name" dir="auto">{name || t('untitledBoard')}</span>
                   {waiting && <span className="side-pending">{t('pending')}</span>}
                 </button>
               </li>

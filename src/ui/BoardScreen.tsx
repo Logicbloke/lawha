@@ -279,7 +279,7 @@ function Board({ view }: { view: BoardView }) {
             />
           </form>
         ) : (
-          <h1 className="board-name" onDoubleClick={() => isAdmin && (setName(view.name), setEditingName(true))}>
+          <h1 className="board-name" dir="auto" onDoubleClick={() => isAdmin && (setName(view.name), setEditingName(true))}>
             {view.name || t('untitledBoard')}
           </h1>
         )}
