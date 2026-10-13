@@ -29,6 +29,7 @@ import {
 import { deleteContact, getContacts, putContact } from '../core/db'
 import type { ContactRecord, Role } from '../core/types'
 import { getDb, getEngine, me, navigate, setWorkspace, toast, useApp } from './store'
+import { grouping, localCategories, saveLocalCategories } from './categories'
 import { translate, type TKey } from '../ui/i18n'
 
 /** User-facing actions. Errors become toasts in the user's language. */
@@ -252,6 +253,64 @@ export function setEntry(
       removed: entry.removed ?? false,
     }),
   )
+}
+
+// ---- board categories (a workspace's in its log; personal ones on this device) ----
+
+export function createCategory(ws: string | null, name: string): Promise<string | undefined> {
+  return run(async () => {
+    const live = grouping(ws).categories
+    const pos = positionsAt(live.map((c) => c.pos), live.length, 1)[0]!
+    const id = newEntityId()
+    if (ws) {
+      await op(ws, { k: 'category.set', id, name, pos, archived: false })
+    } else {
+      const l = localCategories()
+      saveLocalCategories({ ...l, categories: [...l.categories, { id, name, pos }] })
+    }
+    return id
+  })
+}
+
+export function renameCategory(ws: string | null, id: string, name: string): Promise<void | undefined> {
+  return run(async () => {
+    if (ws) {
+      const c = view(ws).categories.get(id)
+      if (!c) throw new ActionError('no such category')
+      await op(ws, { k: 'category.set', ...c, name })
+    } else {
+      const l = localCategories()
+      saveLocalCategories({ ...l, categories: l.categories.map((c) => (c.id === id ? { ...c, name } : c)) })
+    }
+  })
+}
+
+/** Its boards go back to the main list. */
+export function deleteCategory(ws: string | null, id: string): Promise<void | undefined> {
+  return run(async () => {
+    if (ws) {
+      const c = view(ws).categories.get(id)
+      if (!c) throw new ActionError('no such category')
+      await op(ws, { k: 'category.set', ...c, archived: true })
+    } else {
+      const l = localCategories()
+      saveLocalCategories({
+        categories: l.categories.filter((c) => c.id !== id),
+        place: Object.fromEntries(Object.entries(l.place).filter(([, c]) => c !== id)),
+      })
+    }
+  })
+}
+
+export function placeBoard(ws: string | null, board: string, category: string | null): Promise<void | undefined> {
+  return run(async () => {
+    if (ws) {
+      await op(ws, { k: 'board.place', board, category })
+    } else {
+      const { [board]: _old, ...place } = localCategories().place
+      saveLocalCategories({ ...localCategories(), place: category ? { ...place, [board]: category } : place })
+    }
+  })
 }
 
 // ---- members ----

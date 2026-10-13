@@ -30,12 +30,41 @@ function Main() {
   }
 }
 
+/**
+ * `details.menu` popups close on a click elsewhere or on Escape (which then
+ * closes only the menu, not a dialog behind it). Registered before any
+ * dialog, so this listener runs first.
+ */
+function useMenuDismiss(): void {
+  useEffect(() => {
+    const open = () => [...document.querySelectorAll<HTMLDetailsElement>('details.menu[open]')]
+    const onPointer = (e: PointerEvent) => {
+      for (const d of open()) if (!(e.target instanceof Node && d.contains(e.target))) d.removeAttribute('open')
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const menus = open()
+      if (menus.length === 0) return
+      for (const d of menus) d.removeAttribute('open')
+      menus[0]!.querySelector('summary')?.focus()
+      e.stopImmediatePropagation()
+    }
+    document.addEventListener('pointerdown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [])
+}
+
 export function App() {
   const phase = useApp((s) => s.phase)
   const identity = useApp((s) => s.identity)
   const route = useApp((s) => s.route)
   const t = useT()
   const [drawer, setDrawer] = useState(false)
+  useMenuDismiss()
 
   // the drawer closes on navigation (phone layout)
   useEffect(() => setDrawer(false), [route])

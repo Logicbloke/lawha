@@ -381,10 +381,112 @@ button.wordmark:hover:not(:disabled) {
 }
 .side-board-name {
   flex: 1;
-  text-align: match-parent;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* categories: a quiet heading you can fold; boards inside are inset */
+.side-main,
+.side-cat {
+  border-radius: var(--r-ctl);
+}
+.side-cat {
+  margin-top: 0.3rem;
+}
+.side-cat ul {
+  padding-inline-start: 0.55rem;
+}
+.side-cat-head {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.side-cat-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  background: none;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--r-ctl);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--faint);
+  text-align: start;
+}
+.side-cat-toggle:hover:not(:disabled) {
+  background: var(--ink-2);
+  color: var(--text);
+}
+.side-chevron {
+  flex: none;
+  transform: rotate(90deg);
+  transition: transform 120ms ease;
+}
+.side-cat-toggle[aria-expanded='false'] .side-chevron {
+  transform: none;
+}
+[dir='rtl'] .side-cat-toggle[aria-expanded='false'] .side-chevron {
+  transform: scaleX(-1);
+}
+.side-cat-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-count {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+details.menu.side-cat-menu > summary {
+  width: 1.6rem;
+  height: 1.6rem;
+  color: var(--faint);
+}
+.side-drop-hint {
+  margin: 0.15rem 0.5rem 0.3rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-ctl);
+  font-size: 0.8rem;
+  color: var(--faint);
+}
+/* the board being dragged is amber; where it would land takes its tint */
+.side-main.drop-over,
+.side-cat.drop-over {
+  background: var(--amber-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 55%, transparent);
+}
+.side-dragging {
+  opacity: 0.35;
+}
+.side-board.can-drag {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.side-board-overlay {
+  width: 13rem;
+  color: var(--text);
+  background: var(--slate);
+  border: 1px solid var(--amber);
+  box-shadow: var(--shadow-lift);
+  cursor: grabbing;
+}
+.side-actions {
+  margin-top: 0.4rem;
+}
+/*
+ * Names people typed carry dir="auto", so a title in the other script reads
+ * and truncates correctly; they still line up with the interface around them.
+ */
+:root[dir='ltr'] :is(.side-board-name, .side-cat-name, .board-tile-name, .home-category h2, .board-name) {
+  text-align: left;
+}
+:root[dir='rtl'] :is(.side-board-name, .side-cat-name, .board-tile-name, .home-category h2, .board-name) {
+  text-align: right;
 }
 .side-pending {
   font-size: 0.72rem;
@@ -479,6 +581,15 @@ button.wordmark:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+.home-category {
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.6rem;
+}
+.home-category h2 {
+  font-size: 1.05rem;
+  color: var(--muted);
 }
 .board-grid {
   list-style: none;

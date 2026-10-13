@@ -100,12 +100,18 @@ export type BoardOp =
   | { k: 'field.set'; id: string; name: string; type: FieldType; options: FieldOption[]; archived: boolean }
   /** one value on a card: a card may hold any number of entries of the same field */
   | { k: 'entry.set'; id: string; card: string; field: string; value: FieldValue; removed: boolean }
+  /** workspaces: a category company boards are grouped under in everyone's sidebar */
+  | { k: 'category.set'; id: string; name: string; pos: string; archived: boolean }
+  /** workspaces: put a company board in a category (null: back to the main list) */
+  | { k: 'board.place'; board: string; category: string | null }
 
 export type BoardOpKind = BoardOp['k']
 
 export function requiredRank(op: BoardOp): number {
   if (op.k === 'profile.set') return RANK.viewer
-  if (op.k === 'board.update' || op.k === 'field.set') return RANK.admin
+  if (op.k === 'board.update' || op.k === 'field.set' || op.k === 'category.set' || op.k === 'board.place') {
+    return RANK.admin
+  }
   return RANK.editor
 }
 
@@ -310,6 +316,18 @@ export function opSchemaError(x: unknown): string | null {
         isBool(o.removed)
         ? null
         : 'bad entry.set'
+    case 'category.set':
+      return allowedKeys(o, ['k', 'id', 'name', 'pos', 'archived']) &&
+        isId(o.id) &&
+        isStr(o.name, MAX_NAME, 1) &&
+        isPos(o.pos) &&
+        isBool(o.archived)
+        ? null
+        : 'bad category.set'
+    case 'board.place':
+      return allowedKeys(o, ['k', 'board', 'category']) && isPub(o.board) && (o.category === null || isId(o.category))
+        ? null
+        : 'bad board.place'
     default:
       return 'unknown op'
   }
@@ -344,6 +362,13 @@ export interface FieldEntry {
   id: string
   field: string
   value: FieldValue
+}
+
+export interface Category {
+  id: string
+  name: string
+  pos: string
+  archived: boolean
 }
 
 export interface Comment {
@@ -424,6 +449,10 @@ export interface BoardView {
   labels: Map<string, Label>
   /** field templates, archived ones included */
   fields: Map<string, FieldDef>
+  /** workspaces: board categories, archived ones included */
+  categories: Map<string, Category>
+  /** workspaces: board id → category id as last placed (the category may since be archived) */
+  placements: Map<string, string | null>
   members: Member[]
   profiles: Map<string, string>
   myRole: RoleOrNone
@@ -623,6 +652,8 @@ export function computeBoard(
   const cards = new Map<string, Card & { created: boolean; movedVer: string; edits: string[] }>()
   const comments = new Map<string, Comment>()
   const fields = new Map<string, FieldDef>()
+  const categories = new Map<string, Category>()
+  const placements = new Map<string, string | null>()
   const entries = new Map<string, { id: string; card: string; field: string; value: FieldValue; removed: boolean }>()
 
   const cardStub = (id: string, a: Applied) => {
@@ -755,6 +786,12 @@ export function computeBoard(
         cardStub(op.card, a).edits.push(a.m.id)
         break
       }
+      case 'category.set':
+        categories.set(op.id, { id: op.id, name: op.name, pos: op.pos, archived: op.archived })
+        break
+      case 'board.place':
+        placements.set(op.board, op.category)
+        break
     }
   }
 
@@ -820,6 +857,8 @@ export function computeBoard(
     movedOut,
     labels,
     fields,
+    categories,
+    placements,
     members,
     profiles,
     myRole: res.roles.get(me.pub) ?? 'none',

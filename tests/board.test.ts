@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { randomBytes } from '@noble/hashes/utils.js'
+import { toB64url } from '../src/core/b64'
 import { Peer, cardTitles, syncAll } from './sim'
 import {
   carryFields,
@@ -392,6 +394,57 @@ describe('card fields', () => {
     entry(e, b, c, notes, 'concurrent')
     syncAll(o, e)
     expect(o.view(b).cards.get(c)!.editedAfterMove).toBe(true)
+  })
+})
+
+describe('board categories (workspaces)', () => {
+  function company(): { o: Peer; e: Peer; ws: string } {
+    const o = new Peer('owner')
+    const e = new Peer('coworker')
+    const { id: ws, items } = createBoardItems(o.id, { kind: 'workspace', ws: null, name: 'Acme', myName: 'owner', columns: [] })
+    o.write(items)
+    o.write([setRoleItem(o.view(ws), o.id, e.pub, 'editor')])
+    syncAll(o, e)
+    return { o, e, ws }
+  }
+  const boardId = () => toB64url(randomBytes(32))
+
+  it('admins define categories and place boards; every coworker folds the same grouping', () => {
+    const { o, e, ws } = company()
+    const ops = newEntityId()
+    const [b1, b2] = [boardId(), boardId()]
+    o.op(ws, { k: 'category.set', id: ops, name: 'Operations', pos: 'a0', archived: false })
+    o.op(ws, { k: 'board.place', board: b1, category: ops })
+    o.op(ws, { k: 'board.place', board: b2, category: ops })
+    o.op(ws, { k: 'board.place', board: b2, category: null })
+    syncAll(o, e)
+    const v = e.view(ws)
+    expect(v.categories.get(ops)?.name).toBe('Operations')
+    expect(v.placements.get(b1)).toBe(ops)
+    expect(v.placements.get(b2)).toBeNull()
+  })
+
+  it('a coworker who is not an admin cannot regroup the company', () => {
+    const { o, e, ws } = company()
+    const ops = newEntityId()
+    const b = boardId()
+    o.op(ws, { k: 'category.set', id: ops, name: 'Operations', pos: 'a0', archived: false })
+    o.op(ws, { k: 'board.place', board: b, category: ops })
+    syncAll(o, e)
+    e.op(ws, { k: 'category.set', id: ops, name: 'Mine now', pos: 'a0', archived: true })
+    e.op(ws, { k: 'board.place', board: b, category: null })
+    syncAll(o, e)
+    for (const p of [o, e]) {
+      expect(p.view(ws).categories.get(ops)).toEqual({ id: ops, name: 'Operations', pos: 'a0', archived: false })
+      expect(p.view(ws).placements.get(b)).toBe(ops)
+    }
+  })
+
+  it('rejects malformed category ops', () => {
+    expect(opSchemaError({ k: 'category.set', id: newEntityId(), name: '', pos: 'a0', archived: false })).toBe(
+      'bad category.set',
+    )
+    expect(opSchemaError({ k: 'board.place', board: 'nope', category: null })).toBe('bad board.place')
   })
 })
 

@@ -153,6 +153,19 @@ export class Engine {
     return [...this.boards.values()].map((s) => s.record)
   }
 
+  /** Text sealed under this install's local key (nothing readable at rest). */
+  sealText(text: string): string {
+    return JSON.stringify(sealLocal(this.local, text))
+  }
+
+  openText(sealed: string): string | null {
+    try {
+      return openLocal(this.local, JSON.parse(sealed) as { n: string; box: string })
+    } catch {
+      return null
+    }
+  }
+
   /** Display name: live from the fold, else the sealed local cache. */
   boardName(board: string): string {
     const st = this.boards.get(board)

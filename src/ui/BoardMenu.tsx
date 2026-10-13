@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import type { BoardView } from '../core/board'
 import { RANK } from '../core/types'
-import { archiveColumn, leaveBoard, setMyName, updateCard } from '../state/actions'
-import { me } from '../state/store'
+import { archiveColumn, leaveBoard, placeBoard, setMyName, updateCard } from '../state/actions'
+import { useGrouping } from '../state/categories'
+import { getEngine, me } from '../state/store'
 import { Modal } from './CardDetail'
 import { FieldSettings } from './FieldSettings'
 import { useT } from './i18n'
@@ -10,8 +11,12 @@ import { useT } from './i18n'
 /** Board-level actions: rename, your display name here, archive, leave. */
 export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): void }) {
   const t = useT()
-  const [panel, setPanel] = useState<'name' | 'fields' | 'archive' | null>(null)
+  const [panel, setPanel] = useState<'name' | 'fields' | 'category' | 'archive' | null>(null)
   const [name, setName] = useState(view.profiles.get(me().pub) ?? '')
+  // the same grouping as the sidebar: the board's workspace, or this device for personal boards
+  const ws = getEngine().wsOf(view.id)
+  const grouping = useGrouping(ws)
+  const [category, setCategory] = useState('')
   const close = (e: React.MouseEvent) => (e.currentTarget.closest('details') as HTMLDetailsElement).removeAttribute('open')
   const isAdmin = RANK[view.myRole] >= RANK.admin
   const canEdit = RANK[view.myRole] >= RANK.editor
@@ -31,6 +36,17 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
             <button onClick={(e) => (close(e), onRename())}>{t('renameBoard')}</button>
           )}
           {isAdmin && <button onClick={(e) => (close(e), setPanel('fields'))}>{t('cardFields')}</button>}
+          {grouping.canManage && grouping.categories.length > 0 && (
+            <button
+              onClick={(e) => {
+                close(e)
+                setCategory(grouping.placeOf(view.id) ?? '')
+                setPanel('category')
+              }}
+            >
+              {t('category')}
+            </button>
+          )}
           <button onClick={(e) => (close(e), setPanel('name'))}>{t('myNameHere')}</button>
           <button onClick={(e) => (close(e), setPanel('archive'))}>
             {t('archivedItems', { n: view.archivedCards.length + view.archivedColumns.length })}
@@ -70,6 +86,31 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
       {panel === 'fields' && (
         <Modal label={t('cardFields')} onClose={() => setPanel(null)}>
           <FieldSettings view={view} onDone={() => setPanel(null)} />
+        </Modal>
+      )}
+
+      {panel === 'category' && (
+        <Modal label={t('category')} onClose={() => setPanel(null)}>
+          <form
+            className="stack"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void placeBoard(ws, view.id, category || null)
+              setPanel(null)
+            }}
+          >
+            <h2>{t('category')}</h2>
+            <p className="hint">{ws ? t('categoryHintCompany') : t('categoryHintPersonal')}</p>
+            <select autoFocus value={category} aria-label={t('category')} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">{t('noCategory')}</option>
+              {grouping.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <button className="primary">{t('save')}</button>
+          </form>
         </Modal>
       )}
 
