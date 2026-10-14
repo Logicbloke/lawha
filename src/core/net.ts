@@ -12,15 +12,14 @@ export type Strategy = (typeof ALL_STRATEGIES)[number]
 /**
  * Nostr relays that forward the ephemeral events Trystero signals with
  * (checked 2026-10). Trystero's own pick for this app id had three of five
- * dead or refusing; the two live ones stay so older installs still meet us.
+ * dead or refusing; nos.lol stays so older installs still meet us. Not
+ * relay.damus.io: it takes a few notes a minute per IP and then bans the IP
+ * for an hour, and every room announces on each relay every 5.3 s.
  */
-export const NOSTR_RELAYS = [
-  'wss://relay2.angor.io',
-  'wss://relay02.lnfi.network',
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://purplerelay.com',
-]
+export const NOSTR_RELAYS = ['wss://relay2.angor.io', 'wss://relay02.lnfi.network', 'wss://nos.lol', 'wss://purplerelay.com']
+
+/** WebTorrent trackers that answer (checked 2026-10): two of Trystero's three picks are gone. */
+export const TORRENT_TRACKERS = ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebtorrent.com']
 
 export interface NetHandlers {
   onPeer(ch: PeerChannel): void
@@ -235,6 +234,7 @@ export class NetworkManager {
     const config: Record<string, unknown> = { password: spec.password }
     if (strategy === 'mqtt' && this.options.mqttUrls) config.relayConfig = { urls: this.options.mqttUrls }
     if (strategy === 'nostr') config.relayConfig = { urls: NOSTR_RELAYS }
+    if (strategy === 'torrent') config.relayConfig = { urls: TORRENT_TRACKERS }
     const ice = this.options.iceServers?.() ?? []
     if (ice.length > 0) config.turnConfig = ice
     let room: TrysteroRoom

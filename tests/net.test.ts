@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NetworkManager, type JoinFn, type TrysteroRoom } from '../src/core/net'
+import { NOSTR_RELAYS, NetworkManager, TORRENT_TRACKERS, type JoinFn, type TrysteroRoom } from '../src/core/net'
 import type { RoomSpec } from '../src/core/engine'
 
 interface FakeRoom extends TrysteroRoom {
@@ -45,6 +45,18 @@ const quiet = { onPeer: () => undefined, onPeerGone: () => undefined, onMessage:
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 describe('network rooms', () => {
+  it('nostr and torrent use the pinned relays and trackers, not Trystero\'s picks', () => {
+    const nostr = fakeTrystero()
+    const torrent = fakeTrystero()
+    const net = new NetworkManager(quiet, { joins: { nostr: nostr.join, torrent: torrent.join, mqtt: fakeTrystero().join } })
+    net.join(spec, ['nostr', 'torrent'])
+    expect(nostr.created[0]!.config.relayConfig).toEqual({ urls: NOSTR_RELAYS })
+    expect(torrent.created[0]!.config.relayConfig).toEqual({ urls: TORRENT_TRACKERS })
+    // rate-limits Trystero's announces, then bans the IP for an hour
+    expect(NOSTR_RELAYS).not.toContain('wss://relay.damus.io')
+    net.stop()
+  })
+
   it('a room left and wanted again at once is joined afresh once the leave is done, not reused while dying', async () => {
     const t = fakeTrystero()
     const net = new NetworkManager(quiet, { strategies: ['mqtt'], joins: { mqtt: t.join } })
