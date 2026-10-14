@@ -1,0 +1,16 @@
+diff --git a/dist/strategy.mjs b/dist/strategy.mjs
+index abfdde47e01926c4889dee18106e06c92b9a62ea..63c206d368de144a51dee9cbb7baeb397f4f77bb 100644
+--- a/dist/strategy.mjs
++++ b/dist/strategy.mjs
+@@ -7,7 +7,10 @@ import room_default from "./room.mjs";
+ import { SharedPeerManager } from "./shared-peer.mjs";
+ import { clearConnectedPeer, createSignalHandler, getState, resetOfferState, updateStatus } from "./signal-handler.mjs";
+ //#region src/strategy.ts
+-const announceIntervalMs = 5333;
++// lawha: repeat announcements every 30 s, not 5.3 s. A joiner's warm-up
++// burst is what finds the peers already in a room; the repeat only recovers
++// missed meetings, and at 5.3 s per room per relay it got us rate-limited.
++const announceIntervalMs = 30000;
+ const announceWarmupIntervalsMs = [
+ 	233,
+ 	533,

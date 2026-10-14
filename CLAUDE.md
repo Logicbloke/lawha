@@ -52,6 +52,7 @@ Strict layering: `src/core/` has **no React imports**; `src/state/` bridges core
 - Card fields: `field.set` is admin-only and rewritten whole (state edits go through `editField`'s queue); its type is fixed by the first write. `entry.set` values are checked against the field type in the fold, never trusted from the op.
 - ACL rules (acl.ts header comment) are security-critical: rank rule, `roleAt` frontier/tie-break, `upTo` cutoffs, owner events always valid. Any change needs attack-scenario tests in `tests/acl.test.ts`.
 - One writer per install (Web Locks in `state/store.ts`); `dev` ids are never exported.
+- Trystero is patched (`patches/`, via `bun patch`): rooms repeat announcements every 30 s, not 5.3 s, which got us rate-limited on relays. The patch is pinned to the version, so redo it when upgrading; `tests/net.test.ts` fails if it is lost.
 - A new sync action goes only to peers whose `hi` advertises it (as `look: 1` does): Trystero queues messages for an action the receiver never registered, unread and unbounded, so older installs would leak.
 - Batches for a board are processed sequentially in sync (`handleMsgs` queue); receive must treat a concurrently stored identical envelope as a duplicate, never a fork.
 - All user content is rendered as text (XSS steals keys). Strict CSP is injected into production builds.

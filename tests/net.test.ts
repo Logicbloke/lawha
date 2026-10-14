@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { NOSTR_RELAYS, NetworkManager, TORRENT_TRACKERS, type JoinFn, type TrysteroRoom } from '../src/core/net'
 import type { RoomSpec } from '../src/core/engine'
@@ -45,6 +46,11 @@ const quiet = { onPeer: () => undefined, onPeerGone: () => undefined, onMessage:
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 describe('network rooms', () => {
+  it('Trystero repeats announcements every 30 s, not its 5.3 s (patches/; redo the patch when upgrading)', () => {
+    const src = readFileSync(new URL('../node_modules/@trystero-p2p/core/dist/strategy.mjs', import.meta.url), 'utf8')
+    expect(src).toMatch(/^const announceIntervalMs = 30000;$/m)
+  })
+
   it('nostr and torrent use the pinned relays and trackers, not Trystero\'s picks', () => {
     const nostr = fakeTrystero()
     const torrent = fakeTrystero()
