@@ -259,8 +259,9 @@ export function setEntry(
 
 export function createCategory(ws: string | null, name: string): Promise<string | undefined> {
   return run(async () => {
-    const live = grouping(ws).categories
-    const pos = positionsAt(live.map((c) => c.pos), live.length, 1)[0]!
+    // after every shared position (the list itself may be in this device's own order)
+    const keys = grouping(ws).categories.map((c) => c.pos).sort()
+    const pos = positionsAt(keys, keys.length, 1)[0]!
     const id = newEntityId()
     if (ws) {
       await op(ws, { k: 'category.set', id, name, pos, archived: false })

@@ -24,9 +24,11 @@ A Shabaka key backup works here too and keeps the same identity.
 
 - Multiple boards, each with its own members; personal boards and **company
   workspaces**.
-- **Categories** in the sidebar: drag a board onto one, fold them away. A
-  company's categories are shared with every coworker (only workspace admins
-  change them); personal boards are grouped per device.
+- **Categories** in the sidebar: drag a board onto one, fold them away,
+  drag their headers into the order you like. A company's categories are
+  shared with every coworker (only workspace admins change them); folding
+  and ordering are your own, on each device. Personal boards are grouped per
+  device.
 - Columns you add, rename, reorder, archive, with work-in-progress limits.
 - Cards with descriptions, labels, assignees, due dates and comments.
 - **Card fields**: admins define fields per board (text, number, link, date,

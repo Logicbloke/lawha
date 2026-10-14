@@ -4,6 +4,7 @@ import {
   DragOverlay,
   MouseSensor,
   TouchSensor,
+  closestCenter,
   pointerWithin,
   rectIntersection,
   useDraggable,
@@ -13,21 +14,41 @@ import {
   type Announcements,
   type CollisionDetection,
 } from '@dnd-kit/core'
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { getEngine, navigate } from '../state/store'
 import { createBoard, createCategory, deleteCategory, placeBoard, renameCategory } from '../state/actions'
-import { groupBoards, toggleCollapsed, useCollapsed, useGrouping, type CategoryItem } from '../state/categories'
+import {
+  groupBoards,
+  setCategoryOrder,
+  toggleCollapsed,
+  useCollapsed,
+  useGrouping,
+  type CategoryItem,
+} from '../state/categories'
 import { useBoardIds } from './hooks'
 import { useT } from './i18n'
 import { NewThing } from './NewThing'
 
-/** Drop target ids: `cat:<category id>`, or `cat:` for the main list. */
+/**
+ * Ids: a board is dragged by its own id; a category is a sortable `cat:<id>`,
+ * which is also where boards drop; `cat:` alone is the main list.
+ */
 const MAIN = 'cat:'
+const isCategoryDrag = (data: unknown) => (data as { type?: string } | undefined)?.type === 'category'
 
 let lastDragAt = 0
 const justDragged = () => Date.now() - lastDragAt < 350
 
-// the pointer decides; fall back to overlap for drops just outside a section
 const collision: CollisionDetection = (args) => {
+  // a category being reordered lands among the other categories
+  if (isCategoryDrag(args.active.data.current)) {
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((c) => isCategoryDrag(c.data.current)),
+    })
+  }
+  // a board: the pointer decides; fall back to overlap for drops just outside a section
   const hits = pointerWithin(args)
   return hits.length > 0 ? hits : rectIntersection(args)
 }
@@ -36,7 +57,9 @@ const collision: CollisionDetection = (args) => {
  * The sidebar's boards: the main list, then collapsible categories. Whoever
  * may organize them (workspace admins; anyone for personal boards) drags a
  * board onto a category, or back onto the main list. Board options offer the
- * same through a menu for keyboard users.
+ * same through a menu for keyboard users. Anyone reorders the categories by
+ * dragging their headers (or Move up/down in their menu); that order is kept
+ * on this device only.
  */
 export function SideBoards({ ws, openId }: { ws: string | null; openId: string | null }) {
   const t = useT()
@@ -51,9 +74,9 @@ export function SideBoards({ ws, openId }: { ws: string | null; openId: string |
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   )
 
-  const nameOf = (id: string) => engine.boardName(id) || t('untitledBoard')
-  const targetName = (over: string) =>
-    over === MAIN ? t('boards') : (g.categories.find((c) => `cat:${c.id}` === over)?.name ?? '')
+  const categoryName = (sortId: string) => g.categories.find((c) => `cat:${c.id}` === sortId)?.name ?? ''
+  const nameOf = (id: string) => (id.startsWith(MAIN) ? categoryName(id) : engine.boardName(id) || t('untitledBoard'))
+  const targetName = (over: string) => (over === MAIN ? t('boards') : categoryName(over))
   const announcements: Announcements = {
     onDragStart: ({ active }) => t('dndPicked', { name: nameOf(String(active.id)) }),
     onDragOver: ({ active, over }) =>
@@ -69,6 +92,16 @@ export function SideBoards({ ws, openId }: { ws: string | null; openId: string |
 
   // people who cannot organize see only the categories holding boards they follow
   const shownGroups = g.canManage ? groups : groups.filter((x) => x.ids.length > 0)
+  const shownIds = shownGroups.map((x) => x.category.id)
+  /** Move a category next to a visible neighbour; hidden empty ones keep their place. */
+  const moveTo = (id: string, neighbour: string) => {
+    const all = g.categories.map((c) => c.id)
+    setCategoryOrder(ws, arrayMove(all, all.indexOf(id), all.indexOf(neighbour)))
+  }
+  const moveBy = (id: string, by: number) => {
+    const neighbour = shownIds[shownIds.indexOf(id) + by]
+    if (neighbour) moveTo(id, neighbour)
+  }
 
   return (
     <DndContext
@@ -81,6 +114,10 @@ export function SideBoards({ ws, openId }: { ws: string | null; openId: string |
         lastDragAt = Date.now()
         setDragging(null)
         if (!over) return
+        if (isCategoryDrag(active.data.current)) {
+          if (over.id !== active.id) moveTo(String(active.id).slice(MAIN.length), String(over.id).slice(MAIN.length))
+          return
+        }
         const board = String(active.id)
         const category = String(over.id).slice(MAIN.length) || null
         if (category !== g.placeOf(board)) void placeBoard(ws, board, category)
@@ -96,20 +133,27 @@ export function SideBoards({ ws, openId }: { ws: string | null; openId: string |
             ))}
           </ul>
         )}
-        {dragging && loose.length === 0 && <p className="side-drop-hint">{t('dropToMainList')}</p>}
+        {dragging && !dragging.startsWith(MAIN) && loose.length === 0 && (
+          <p className="side-drop-hint">{t('dropToMainList')}</p>
+        )}
       </Section>
 
-      {shownGroups.map(({ category, ids }) => (
-        <CategorySection
-          key={category.id}
-          ws={ws}
-          category={category}
-          ids={ids}
-          openId={openId}
-          canManage={g.canManage}
-          collapsed={collapsed.includes(category.id)}
-        />
-      ))}
+      <SortableContext items={shownIds.map((id) => `cat:${id}`)} strategy={verticalListSortingStrategy}>
+        {shownGroups.map(({ category, ids }, i) => (
+          <CategorySection
+            key={category.id}
+            ws={ws}
+            category={category}
+            ids={ids}
+            openId={openId}
+            canManage={g.canManage}
+            collapsed={collapsed.includes(category.id)}
+            onMove={i > 0 || i < shownGroups.length - 1 ? (by) => moveBy(category.id, by) : undefined}
+            first={i === 0}
+            last={i === shownGroups.length - 1}
+          />
+        ))}
+      </SortableContext>
 
       <div className="side-actions">
         <NewThing label={t('newBoard')} placeholder={t('boardName')} onCreate={(name) => void createBoard(name, ws)} />
@@ -123,7 +167,7 @@ export function SideBoards({ ws, openId }: { ws: string | null; openId: string |
 
       <DragOverlay dropAnimation={null}>
         {dragging && (
-          <div className="side-board side-board-overlay">
+          <div className={`side-board side-board-overlay ${dragging.startsWith(MAIN) ? 'category' : ''}`}>
             <span className="side-board-name" dir="auto">
               {nameOf(dragging)}
             </span>
@@ -146,7 +190,7 @@ function Section({ id, className, children }: { id: string; className: string; c
 function BoardRow({ id, active, draggable }: { id: string; active: boolean; draggable: boolean }) {
   const t = useT()
   const engine = getEngine()
-  const { setNodeRef, listeners, isDragging } = useDraggable({ id, disabled: !draggable })
+  const { setNodeRef, listeners, isDragging } = useDraggable({ id, data: { type: 'board' }, disabled: !draggable })
   const v = engine.view(id)
   const waiting = !v || v.myRole === 'none'
   return (
@@ -173,10 +217,17 @@ interface CategoryProps {
   openId: string | null
   canManage: boolean
   collapsed: boolean
+  /** Move up (-1) or down (+1) among the visible categories; absent when there is only one */
+  onMove?(by: number): void
+  first: boolean
+  last: boolean
 }
 
-function CategorySection({ ws, category, ids, openId, canManage, collapsed }: CategoryProps) {
+function CategorySection({ ws, category, ids, openId, canManage, collapsed, onMove, first, last }: CategoryProps) {
   const t = useT()
+  const sortable = useSortable({ id: `cat:${category.id}`, data: { type: 'category' } })
+  // boards dropping in tint it; categories being reordered just make room
+  const boardOver = sortable.isOver && !isCategoryDrag(sortable.active?.data.current)
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(category.name)
   // a collapsed category still shows the board that is open
@@ -189,7 +240,11 @@ function CategorySection({ ws, category, ids, openId, canManage, collapsed }: Ca
   }
 
   return (
-    <Section id={`cat:${category.id}`} className="side-cat">
+    <div
+      ref={sortable.setNodeRef}
+      style={{ transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition }}
+      className={`side-cat ${boardOver ? 'drop-over' : ''} ${sortable.isDragging ? 'side-dragging' : ''}`}
+    >
       <div className="side-cat-head">
         {renaming ? (
           <form
@@ -214,7 +269,14 @@ function CategorySection({ ws, category, ids, openId, canManage, collapsed }: Ca
             />
           </form>
         ) : (
-          <button className="side-cat-toggle" aria-expanded={!collapsed} onClick={() => toggleCollapsed(category.id)}>
+          <button
+            ref={sortable.setActivatorNodeRef}
+            className="side-cat-toggle"
+            {...sortable.listeners}
+            aria-expanded={!collapsed}
+            // the click that ends a drag of this header is swallowed by dnd-kit
+            onClick={() => toggleCollapsed(category.id)}
+          >
             <svg className="side-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
               <path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -224,7 +286,7 @@ function CategorySection({ ws, category, ids, openId, canManage, collapsed }: Ca
             <span className="side-count">{ids.length}</span>
           </button>
         )}
-        {canManage && !renaming && (
+        {(canManage || onMove) && !renaming && (
           <details className="menu side-cat-menu">
             <summary aria-label={t('categoryOptions', { name: category.name })}>
               <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -234,17 +296,31 @@ function CategorySection({ ws, category, ids, openId, canManage, collapsed }: Ca
               </svg>
             </summary>
             <div className="menu-pop">
-              <button onClick={(e) => (close(e), setRenaming(true))}>{t('rename')}</button>
-              <button
-                className="danger"
-                onClick={(e) => {
-                  close(e)
-                  const ask = ws ? 'deleteCompanyCategoryConfirm' : 'deleteCategoryConfirm'
-                  if (confirm(t(ask, { name: category.name }))) void deleteCategory(ws, category.id)
-                }}
-              >
-                {t('deleteCategory')}
-              </button>
+              {onMove && (
+                <>
+                  <button disabled={first} onClick={(e) => (close(e), onMove(-1))}>
+                    {t('moveUp')}
+                  </button>
+                  <button disabled={last} onClick={(e) => (close(e), onMove(1))}>
+                    {t('moveDown')}
+                  </button>
+                </>
+              )}
+              {canManage && (
+                <>
+                  <button onClick={(e) => (close(e), setRenaming(true))}>{t('rename')}</button>
+                  <button
+                    className="danger"
+                    onClick={(e) => {
+                      close(e)
+                      const ask = ws ? 'deleteCompanyCategoryConfirm' : 'deleteCategoryConfirm'
+                      if (confirm(t(ask, { name: category.name }))) void deleteCategory(ws, category.id)
+                    }}
+                  >
+                    {t('deleteCategory')}
+                  </button>
+                </>
+              )}
             </div>
           </details>
         )}
@@ -257,6 +333,6 @@ function CategorySection({ ws, category, ids, openId, canManage, collapsed }: Ca
         </ul>
       )}
       {!collapsed && ids.length === 0 && canManage && <p className="side-drop-hint">{t('dragBoardsHere')}</p>}
-    </Section>
+    </div>
   )
 }

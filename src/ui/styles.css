@@ -475,6 +475,15 @@ details.menu.side-cat-menu > summary {
   box-shadow: var(--shadow-lift);
   cursor: grabbing;
 }
+.side-board-overlay.category {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.side-cat-toggle {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
 .side-actions {
   margin-top: 0.4rem;
 }

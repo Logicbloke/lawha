@@ -6,7 +6,9 @@ import { getEngine, useApp } from './store'
  * Board categories in the sidebar. A company's live in its workspace log, so
  * every coworker sees the same grouping and only workspace admins change it.
  * Personal boards (no company) are grouped per device, sealed under the
- * install's local key in localStorage. Collapsing is always per device.
+ * install's local key in localStorage. Collapsing and the order categories
+ * are listed in are always per device: a company's shared order (creation)
+ * is only the starting point.
  */
 
 export interface CategoryItem {
@@ -30,18 +32,44 @@ export interface LocalCategories {
 
 const LOCAL_KEY = 'lawha-categories'
 const COLLAPSED_KEY = 'lawha-collapsed'
+const ORDER_KEY = 'lawha-category-order'
+
+const isStrings = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === 'string')
 
 function readCollapsed(): string[] {
   try {
     const x: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
-    return Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string') : []
+    return isStrings(x) ? x : []
   } catch {
     return []
   }
 }
 
+/** per sidebar context (a workspace id, or `personal`): category ids in this device's order */
+function readOrder(): Record<string, string[]> {
+  try {
+    const x: unknown = JSON.parse(localStorage.getItem(ORDER_KEY) ?? '{}')
+    if (typeof x !== 'object' || x === null) return {}
+    return Object.fromEntries(Object.entries(x).filter((e): e is [string, string[]] => isStrings(e[1])))
+  } catch {
+    return {}
+  }
+}
+
 /** `v` bumps on every change to the personal categories, so readers re-render */
-const useLocal = create(() => ({ v: 0, collapsed: readCollapsed() }))
+const useLocal = create(() => ({ v: 0, collapsed: readCollapsed(), order: readOrder() }))
+
+const orderKey = (ws: string | null) => ws ?? 'personal'
+
+/** This device's order first; categories it has not placed yet follow in their shared order. */
+function applyOrder(categories: CategoryItem[], order: string[] | undefined): CategoryItem[] {
+  if (!order?.length) return categories
+  const rank = new Map(order.map((id, i) => [id, i]))
+  return categories
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => (rank.get(a.c.id) ?? order.length + a.i) - (rank.get(b.c.id) ?? order.length + b.i))
+    .map(({ c }) => c)
+}
 
 let local: LocalCategories | null = null
 
@@ -95,9 +123,10 @@ const byPos = (a: CategoryItem, b: CategoryItem) => (a.pos !== b.pos ? (a.pos < 
 export function grouping(ws: string | null): Grouping {
   if (ws) {
     const v = getEngine().view(ws)
-    const categories = v
+    const shared = v
       ? [...v.categories.values()].filter((c) => !c.archived).map(({ id, name, pos }) => ({ id, name, pos })).sort(byPos)
       : []
+    const categories = applyOrder(shared, useLocal.getState().order[orderKey(ws)])
     const live = new Set(categories.map((c) => c.id))
     return {
       categories,
@@ -109,7 +138,7 @@ export function grouping(ws: string | null): Grouping {
     }
   }
   const l = localCategories()
-  const categories = [...l.categories].sort(byPos)
+  const categories = applyOrder([...l.categories].sort(byPos), useLocal.getState().order[orderKey(null)])
   const live = new Set(categories.map((c) => c.id))
   return {
     categories,
@@ -124,7 +153,19 @@ export function grouping(ws: string | null): Grouping {
 export function useGrouping(ws: string | null): Grouping {
   useApp((s) => s.version)
   useLocal((s) => s.v)
+  useLocal((s) => s.order)
   return grouping(ws)
+}
+
+/** Remember the order categories are listed in, on this device only. */
+export function setCategoryOrder(ws: string | null, ids: string[]): void {
+  const order = { ...useLocal.getState().order, [orderKey(ws)]: ids }
+  try {
+    localStorage.setItem(ORDER_KEY, JSON.stringify(order))
+  } catch {
+    // kept for this session only
+  }
+  useLocal.setState({ order })
 }
 
 /** Boards split into the main list and each category, keeping the given order. */
