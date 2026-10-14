@@ -22,12 +22,23 @@ import type { AclContent, Envelope, ForkRecord, Identity, StoredMessage } from '
  * two share: one connection per remote install (its "carrier") offers the
  * boards whose ACL names them, and each accepted board runs its own session
  * (own handshake, own gate) wrapped in `mux` messages over that connection.
+ *
+ * `look` says which card someone has open, for the "also viewing" marks. It
+ * is never signed or stored: it lives on live connections between current
+ * members only, is repeated every LOOK_EVERY_MS while the card stays open,
+ * and lapses after LOOK_TTL_MS without a repeat or when the connection goes.
+ * It goes only to peers whose `hi` says they take it: Trystero queues
+ * messages for an action a peer never registered, unread and forever.
  */
 
-export type SyncAction = 'auth' | 'status' | 'have' | 'want' | 'msgs' | 'forks' | 'offer' | 'mux'
-export const SYNC_ACTIONS: SyncAction[] = ['auth', 'status', 'have', 'want', 'msgs', 'forks', 'offer', 'mux']
+export type SyncAction = 'auth' | 'status' | 'have' | 'want' | 'msgs' | 'forks' | 'look' | 'offer' | 'mux'
+export const SYNC_ACTIONS: SyncAction[] = ['auth', 'status', 'have', 'want', 'msgs', 'forks', 'look', 'offer', 'mux']
 /** what a board session sends; `offer` and `mux` belong to the connection itself */
-const SESSION_ACTIONS = new Set<string>(['auth', 'status', 'have', 'want', 'msgs', 'forks'])
+const SESSION_ACTIONS = new Set<string>(['auth', 'status', 'have', 'want', 'msgs', 'forks', 'look'])
+
+/** how often an open card is announced again, and how long a peer's lasts without that */
+export const LOOK_EVERY_MS = 20_000
+export const LOOK_TTL_MS = 60_000
 
 /** What sync.ts sees of a transport — trivially mockable in tests. */
 export interface PeerChannel {
@@ -58,7 +69,10 @@ export interface SyncHost {
   onPeerAuthed?(board: string, pub: string, member: boolean): void
   /** a remote install connected or went away */
   onPresence?(): void
+  /** which cards of this board other people have open may have changed (see lookers()) */
+  onLooks?(board: string): void
   onBadPeer?(key: string): void
+  now?(): number
 }
 
 export const BATCH_SIZE = 50
@@ -86,6 +100,10 @@ interface PeerState {
   proofSent: boolean
   statusSent: boolean
   bad: number
+  /** their `hi` said they take `look` messages */
+  looks: boolean
+  /** the card they have open on this board, and when they last said so */
+  look: { card: string; at: number } | null
 }
 
 function isObj(x: unknown): x is Record<string, unknown> {
@@ -113,6 +131,8 @@ export class SyncManager {
   private carriers = new Map<string, string>()
   /** connection → boards it offered that we did not hold yet */
   private declined = new Map<string, Set<string>>()
+  /** the card we have open, announced to its board's members */
+  private myLook: { board: string; card: string } | null = null
 
   constructor(private host: SyncHost, session?: string) {
     this.session = session ?? toB64url(randomBytes(16))
@@ -120,6 +140,10 @@ export class SyncManager {
 
   private get db(): LawhaDb {
     return this.host.db()
+  }
+
+  private now(): number {
+    return this.host.now?.() ?? Date.now()
   }
 
   onPeerJoin(ch: PeerChannel, via: string | null = null): void {
@@ -138,8 +162,10 @@ export class SyncManager {
       proofSent: false,
       statusSent: false,
       bad: 0,
+      looks: false,
+      look: null,
     })
-    ch.send('auth', { step: 'hi', nonce, session: this.session })
+    ch.send('auth', { step: 'hi', nonce, session: this.session, look: 1 })
   }
 
   onPeerLeave(key: string): void {
@@ -147,8 +173,15 @@ export class SyncManager {
     if (!gone) return
     this.peers.delete(key)
     this.declined.delete(key)
+    const lapsed = new Set<string>()
+    if (gone.look) lapsed.add(gone.ch.board)
     // the sessions it carried end with it
-    for (const [k, p] of this.peers) if (p.via === key) this.peers.delete(k)
+    for (const [k, p] of this.peers) {
+      if (p.via !== key) continue
+      if (p.look) lapsed.add(p.ch.board)
+      this.peers.delete(k)
+    }
+    for (const b of lapsed) this.host.onLooks?.(b)
     const who = gone.via ? null : installOf(gone)
     if (!who) return
     this.host.onPresence?.()
@@ -183,9 +216,14 @@ export class SyncManager {
         return this.handleOffer(peer, payload)
       case 'mux':
         return this.handleMux(peer, payload)
-      case 'status':
-        if (isObj(payload)) peer.servesUs = payload.member === 1
+      case 'status': {
+        if (!isObj(payload)) return
+        const was = peer.servesUs
+        peer.servesUs = payload.member === 1
+        // they drop our `look` until they count us as a member: say it again
+        if (peer.servesUs && !was && this.myLook?.board === peer.ch.board) this.sendLook(peer.ch.board, peer)
         return
+      }
       case 'have':
         return this.handleHave(peer, payload)
       case 'want':
@@ -194,6 +232,8 @@ export class SyncManager {
         return this.handleMsgs(peer, payload)
       case 'forks':
         return this.handleForks(peer, payload)
+      case 'look':
+        return this.handleLook(peer, payload)
     }
   }
 
@@ -205,9 +245,10 @@ export class SyncManager {
       if (!isB64(p.nonce, B64_16) || typeof p.session !== 'string') return
       peer.theirNonce = p.nonce
       peer.theirSession = p.session.slice(0, 64)
+      peer.looks = p.look === 1
       // ours may have reached them before they had the session (one they
       // took up later, or a join they had not seen yet): say it once more
-      if (p.re !== 1) peer.ch.send('auth', { step: 'hi', nonce: peer.nonce, session: this.session, re: 1 })
+      if (p.re !== 1) peer.ch.send('auth', { step: 'hi', nonce: peer.nonce, session: this.session, look: 1, re: 1 })
       if (!peer.proofSent) this.sendProof(peer)
       return
     }
@@ -360,7 +401,51 @@ export class SyncManager {
       peer.ch.send('status', { member: member ? 1 : 0 })
       this.host.onPeerAuthed?.(peer.ch.board, peer.pub!, member)
     }
+    if (changed && member && this.myLook?.board === peer.ch.board) this.sendLook(peer.ch.board, peer)
+    if (changed && !member && peer.look) {
+      peer.look = null
+      this.host.onLooks?.(peer.ch.board)
+    }
     if (member && changed) await this.sendHave(peer)
+  }
+
+  // ---- who has which card open ----
+
+  /** Announce the card we have open (null: none) to the members of its board. */
+  look(target: { board: string; card: string } | null): void {
+    const prev = this.myLook
+    this.myLook = target
+    if (prev && prev.board !== target?.board) this.sendLook(prev.board)
+    if (target) this.sendLook(target.board)
+  }
+
+  private sendLook(board: string, only?: PeerState): void {
+    const card = this.myLook?.board === board ? this.myLook.card : null
+    for (const p of only ? [only] : this.peers.values()) {
+      if (p.ch.board === board && p.served && p.looks) p.ch.send('look', { card })
+    }
+  }
+
+  private handleLook(peer: PeerState, p: unknown): void {
+    // from current members only, like the logs we serve
+    if (!peer.served || !isObj(p)) return
+    if (p.card !== null && !isB64(p.card, B64_16)) return
+    peer.look = p.card === null ? null : { card: p.card, at: this.now() }
+    this.host.onLooks?.(peer.ch.board)
+  }
+
+  /** Card → the other people (pubs, each once, sorted) who have it open on this board. */
+  lookers(board: string): Record<string, string[]> {
+    const now = this.now()
+    const me = this.host.identity.pub
+    const byCard = new Map<string, Set<string>>()
+    for (const p of this.peers.values()) {
+      if (p.ch.board !== board || !p.served || !p.look || p.pub === me || now - p.look.at > LOOK_TTL_MS) continue
+      const set = byCard.get(p.look.card) ?? new Set<string>()
+      set.add(p.pub!)
+      byCard.set(p.look.card, set)
+    }
+    return Object.fromEntries([...byCard].map(([card, pubs]) => [card, [...pubs].sort()]))
   }
 
   // ---- anti-entropy ----

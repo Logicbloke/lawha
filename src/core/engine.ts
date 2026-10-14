@@ -47,6 +47,8 @@ export interface EngineEvents {
   'peer-authed': { board: string; pub: string; member: boolean }
   /** a remote install connected or left (see sync.installs()) */
   presence: Record<string, never>
+  /** someone opened or closed a card of this board (see sync.lookers()) */
+  looks: { board: string }
 }
 
 export interface RoomSpec {
@@ -119,6 +121,8 @@ export class Engine {
       },
       onPeerAuthed: (board, pub, member) => this.events.emit('peer-authed', { board, pub, member }),
       onPresence: () => this.events.emit('presence', {}),
+      onLooks: (board) => this.events.emit('looks', { board }),
+      now: () => this.opts.now(),
     }
     this.sync = new SyncManager(host)
     // what we hold or who is on it changed: shared connections may carry more

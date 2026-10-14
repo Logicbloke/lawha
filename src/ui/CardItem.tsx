@@ -2,7 +2,8 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { BoardView, Card } from '../core/board'
 import { useApp } from '../state/store'
-import { formatDue, isOverdue, useNow } from './hooks'
+import { useViewers } from '../state/looking'
+import { formatDue, isOverdue, shortKey, useNow } from './hooks'
 import { Identicon } from './Identicon'
 import { useT } from './i18n'
 import { justDragged } from './BoardScreen'
@@ -22,6 +23,11 @@ export function CardFace({ card, view, count }: { card: Card; view: BoardView; c
   const lang = useApp((s) => s.lang)
   const now = useNow()
   const labels = card.labels.map((l) => view.labels.get(l)).filter((l) => l && !l.archived)
+  const viewers = useViewers(view.id, card.id)
+  const viewedBy =
+    viewers.length > 0
+      ? t('viewedBy', { names: new Intl.ListFormat(lang).format(viewers.map((p) => view.profiles.get(p) || shortKey(p))) })
+      : ''
   return (
     <>
       {labels.length > 0 && (
@@ -34,8 +40,19 @@ export function CardFace({ card, view, count }: { card: Card; view: BoardView; c
         </span>
       )}
       <span className="card-title">{card.title}</span>
-      {(card.due || card.comments.length > 0 || card.assignees.length > 0 || card.desc) && (
+      {(card.due || card.comments.length > 0 || card.assignees.length > 0 || card.desc || viewers.length > 0) && (
         <span className="card-meta">
+          {viewers.length > 0 && (
+            <span className="viewers" title={viewedBy} aria-label={viewedBy}>
+              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="8" cy="8" r="2" fill="currentColor" />
+              </svg>
+              {viewers.slice(0, 3).map((p) => (
+                <Identicon key={p} pub={p} size={16} />
+              ))}
+            </span>
+          )}
           {card.due && (
             <span className={`due ${isOverdue(card.due, now) ? 'overdue' : ''}`}>
               {formatDue(card.due, lang)}

@@ -3,6 +3,7 @@ import { LABEL_COLORS, type BoardView, type LabelColor } from '../core/board'
 import { RANK } from '../core/types'
 import { getEngine, navigate, useApp } from '../state/store'
 import { addComment, setLabel, updateCard } from '../state/actions'
+import { setOpenCard, useViewers } from '../state/looking'
 import { formatRelative, shortKey, useNow } from './hooks'
 import { CardFields } from './CardFields'
 import { Identicon } from './Identicon'
@@ -65,6 +66,12 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
   const [comment, setComment] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [newColor, setNewColor] = useState<LabelColor>('blue')
+  const viewers = useViewers(view.id, cardId)
+
+  useEffect(() => {
+    setOpenCard({ board: view.id, card: cardId })
+    return () => setOpenCard(null)
+  }, [view.id, cardId])
 
   // keep the draft in step with remote edits unless the field is being typed in
   const titleRef = useRef<HTMLTextAreaElement>(null)
@@ -106,6 +113,17 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
                 : t('inColumn', { column: col?.name ?? t('unsorted') })}
             {card.from && <> {t('movedFromBoard', { board: getEngine().boardName(card.from.board) || t('anotherBoard') })}</>}
           </p>
+          {viewers.length > 0 && (
+            <p className="detail-viewers">
+              <span>{t('alsoViewing')}</span>
+              {viewers.map((p) => (
+                <span key={p} className="viewer">
+                  <Identicon pub={p} size={18} />
+                  <bdi>{nameOf(p)}</bdi>
+                </span>
+              ))}
+            </p>
+          )}
           {card.movedTo && card.editedAfterMove && <p className="notice warn">{t('editedAfterMove')}</p>}
           {card.movedTo && (
             <button className="link" onClick={() => navigate({ name: 'board', id: card.movedTo! })}>

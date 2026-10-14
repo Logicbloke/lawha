@@ -7,7 +7,7 @@ import { Engine } from '../src/core/engine'
 import { generateIdentity } from '../src/core/identity'
 import { createBoardItems, newEntityId, opItem, removeItem, setRoleItem } from '../src/core/actions'
 import { toWire } from '../src/core/envelope'
-import type { PeerChannel, SyncAction } from '../src/core/sync'
+import { LOOK_TTL_MS, type PeerChannel, type SyncAction } from '../src/core/sync'
 import type { Role } from '../src/core/types'
 
 /** In-memory transport: async delivery, explicit links, settle() to quiesce. */
@@ -80,10 +80,9 @@ interface Node {
   pub: string
 }
 
-async function node(): Promise<Node> {
+async function node(now?: () => number, id = generateIdentity()): Promise<Node> {
   const db = await openLawhaDb(uniqueDbName())
-  const id = generateIdentity()
-  const e = new Engine(() => db, id, toB64url(randomBytes(16)), { debounceMs: 0, healDelay: { owner: 0, step: 10 } })
+  const e = new Engine(() => db, id, toB64url(randomBytes(16)), { debounceMs: 0, healDelay: { owner: 0, step: 10 }, now })
   return { e, db, pub: id.pub }
 }
 
@@ -397,3 +396,161 @@ describe('company workspaces', () => {
   })
 })
 
+
+/**
+ * A link that records what each side is sent (`mux` as `mux:<action>`), and
+ * can make `b` an install from before `look`: its `hi` lacks the flag.
+ */
+function tapLink(net: MockNet, ea: Engine, eb: Engine, board: string, bIsOld = false): { toA: string[]; toB: string[] } {
+  const seen = { toA: [] as string[], toB: [] as string[] }
+  const name = (action: SyncAction, payload: unknown) =>
+    action === 'mux' ? `mux:${(payload as { a: string }).a}` : action
+  const a: PeerChannel = {
+    key: `${board}:tap:a`,
+    board,
+    fingerprints: () => ({ local: 'fpA', remote: 'fpB' }),
+    send: (action, payload) => {
+      seen.toB.push(name(action, payload))
+      const copy = JSON.parse(JSON.stringify(payload)) as unknown
+      net.track(Promise.resolve().then(() => eb.sync.onMessage(b, action, copy)))
+    },
+  }
+  const b: PeerChannel = {
+    key: `${board}:tap:b`,
+    board,
+    fingerprints: () => ({ local: 'fpB', remote: 'fpA' }),
+    send: (action, payload) => {
+      seen.toA.push(name(action, payload))
+      const copy = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>
+      const auth = action === 'auth' ? copy : action === 'mux' && copy.a === 'auth' ? (copy.p as Record<string, unknown>) : null
+      if (bIsOld && auth?.step === 'hi') delete auth.look
+      net.track(Promise.resolve().then(() => ea.sync.onMessage(a, action, copy)))
+    },
+  }
+  ea.sync.onPeerJoin(a)
+  eb.sync.onPeerJoin(b)
+  return seen
+}
+
+async function settleAll(net: MockNet, ...nodes: Node[]): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    await net.settle()
+    await Promise.all(nodes.map((n) => n.e.idle()))
+  }
+}
+
+describe('who has a card open', () => {
+  async function shared(now?: () => number): Promise<{ net: MockNet; o: Node; x: Node; b: string; card: string }> {
+    const net = new MockNet()
+    const o = await node(now)
+    const x = await node(now)
+    const b = await makeBoard(o)
+    await addCard(o, b, 'c')
+    await grant(o, b, x, 'editor')
+    await x.e.follow(b, null)
+    return { net, o, x, b, card: [...o.e.view(b)!.cards.keys()][0]! }
+  }
+
+  it('members see which card the other has open, until it is closed', async () => {
+    const { net, o, x, b, card } = await shared()
+    net.link(o.e, x.e, b)
+    await net.settle()
+    x.e.sync.look({ board: b, card })
+    await net.settle()
+    expect(o.e.sync.lookers(b)).toEqual({ [card]: [x.pub] })
+    expect(x.e.sync.lookers(b)).toEqual({}) // not ourselves
+    x.e.sync.look(null)
+    await net.settle()
+    expect(o.e.sync.lookers(b)).toEqual({})
+  })
+
+  it('a member who connects later is told what is already open', async () => {
+    const { net, o, x, b, card } = await shared()
+    o.e.sync.look({ board: b, card })
+    net.link(o.e, x.e, b)
+    await net.settle()
+    expect(x.e.sync.lookers(b)).toEqual({ [card]: [o.pub] })
+  })
+
+  it('a look lapses without a repeat, and when the connection goes', async () => {
+    let t = Date.now()
+    const { net, o, x, b, card } = await shared(() => t)
+    const id = net.link(o.e, x.e, b)
+    await net.settle()
+    x.e.sync.look({ board: b, card })
+    await net.settle()
+    t += LOOK_TTL_MS + 1
+    expect(o.e.sync.lookers(b)).toEqual({})
+    x.e.sync.look({ board: b, card }) // the repeat
+    await net.settle()
+    expect(o.e.sync.lookers(b)).toEqual({ [card]: [x.pub] })
+    const told: string[] = []
+    o.e.events.on('looks', ({ board }) => told.push(board))
+    net.unlink(id)
+    expect(o.e.sync.lookers(b)).toEqual({})
+    expect(told).toEqual([b])
+  })
+
+  it('a non-member is neither told nor heard', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const y = await node()
+    const b = await makeBoard(o)
+    await addCard(o, b, 'c')
+    const card = [...o.e.view(b)!.cards.keys()][0]!
+    await y.e.follow(b, null) // knows the id, is not on it
+    const seen = tapLink(net, o.e, y.e, b)
+    await settleAll(net, o, y)
+    o.e.sync.look({ board: b, card })
+    y.e.sync.look({ board: b, card })
+    await settleAll(net, o, y)
+    expect(seen.toB).not.toContain('look')
+    expect(o.e.sync.lookers(b)).toEqual({})
+  })
+
+  it('a removed member drops out at once and is told nothing more', async () => {
+    const { net, o, x, b, card } = await shared()
+    net.link(o.e, x.e, b)
+    await net.settle()
+    x.e.sync.look({ board: b, card })
+    await net.settle()
+    expect(o.e.sync.lookers(b)).toEqual({ [card]: [x.pub] })
+    await o.e.write([removeItem(o.e.view(b)!, o.e.identity, x.pub)])
+    await net.settle()
+    expect(o.e.sync.lookers(b)).toEqual({})
+  })
+
+  it('an install from before `look` is never sent one, directly or carried', async () => {
+    const o = await node()
+    const x = await node()
+    const [b1, b2] = [await makeBoard(o), await makeBoard(o)]
+    for (const b of [b1, b2]) {
+      await addCard(o, b, 'c')
+      await grant(o, b, x, 'editor')
+      await x.e.follow(b, null)
+    }
+    const net = new MockNet()
+    const seen = tapLink(net, o.e, x.e, b1, true)
+    await settleAll(net, o, x)
+    expect(seen.toB).toContain('mux:have') // b2 is carried over the same connection
+    for (const b of [b1, b2]) o.e.sync.look({ board: b, card: [...o.e.view(b)!.cards.keys()][0]! })
+    o.e.sync.look(null)
+    await settleAll(net, o, x)
+    expect(seen.toB.filter((a) => a.endsWith('look'))).toEqual([])
+  })
+
+  it('my other devices are not someone else', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const o2 = await node(undefined, o.e.identity) // the same key on another device
+    const b = await makeBoard(o)
+    await addCard(o, b, 'c')
+    const card = [...o.e.view(b)!.cards.keys()][0]!
+    await o2.e.follow(b, null)
+    net.link(o.e, o2.e, b)
+    await net.settle()
+    o2.e.sync.look({ board: b, card })
+    await net.settle()
+    expect(o.e.sync.lookers(b)).toEqual({})
+  })
+})

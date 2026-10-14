@@ -969,6 +969,19 @@ details.menu.peer-status > summary {
 .card-meta .assignees .identicon + .identicon {
   margin-inline-start: -5px;
 }
+/* someone else has the card open right now */
+.card-meta .viewers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--amber);
+}
+.viewers .identicon {
+  box-shadow: 0 0 0 1.5px var(--amber);
+}
+.viewers .identicon + .identicon {
+  margin-inline-start: -0.45rem;
+}
 .due {
   font-variant-numeric: tabular-nums;
 }
@@ -1230,6 +1243,20 @@ textarea.detail-title:hover {
 .detail-where {
   color: var(--muted);
   font-size: 0.88rem;
+}
+.detail-viewers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--amber);
+}
+.detail-viewers .viewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text);
 }
 .detail-desc {
   min-height: 7rem;

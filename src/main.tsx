@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './ui/App'
 import { initApp, setOnReady } from './state/store'
 import { startNetwork } from './state/network'
+import { startLooking } from './state/looking'
 import { registerServiceWorker } from './state/swUpdate'
 import './ui/styles.css'
 
@@ -13,7 +14,10 @@ if (window.self !== window.top) {
   throw new Error('lawha refuses to run inside a frame')
 }
 
-setOnReady(startNetwork)
+setOnReady((engine) => {
+  startNetwork(engine)
+  startLooking(engine)
+})
 void initApp()
 
 // PWA: sw.js is emitted only by the hosted production build; dev has no SW
