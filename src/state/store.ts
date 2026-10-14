@@ -19,7 +19,7 @@ import {
 } from '../core/identity'
 import { clearSession, createSession, getSessionExpiry, loadSession } from '../core/session'
 import { Engine } from '../core/engine'
-import type { StrategyState } from '../core/events'
+import type { RelayHealth } from '../core/net'
 import type { Identity } from '../core/types'
 
 export type Route =
@@ -50,7 +50,8 @@ interface AppState {
   ws: string | null
   /** bumped whenever any board re-folds; components re-read views off this */
   version: number
-  peers: Record<string, { state: StrategyState; peerCount: number }>
+  /** discovery relays reachable, people connected, and when a direct connection last failed */
+  net: { relays: Record<string, RelayHealth>; peers: number; unreachableAt: number }
   toasts: Toast[]
   /** multi-select on the open board */
   selection: string[]
@@ -90,7 +91,7 @@ export const useApp = create<AppState>(() => ({
   route: routeFromHash(),
   ws: savedWs(),
   version: 0,
-  peers: {},
+  net: { relays: {}, peers: 0, unreachableAt: 0 },
   toasts: [],
   selection: [],
   waiting: {},
@@ -295,8 +296,8 @@ async function ready(identity: Identity): Promise<void> {
   onReady(engine)
 }
 
-export function peerStatus(strategy: string, state: StrategyState, peerCount: number): void {
-  useApp.setState((s) => ({ peers: { ...s.peers, [strategy]: { state, peerCount } } }))
+export function netStatus(patch: Partial<AppState['net']>): void {
+  useApp.setState((s) => ({ net: { ...s.net, ...patch } }))
 }
 
 // ---- onboarding ----

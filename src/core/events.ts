@@ -20,5 +20,3 @@ export class Emitter<M> {
     for (const fn of set) (fn as Handler<M[K]>)(payload)
   }
 }
-
-export type StrategyState = 'connecting' | 'connected' | 'failed'

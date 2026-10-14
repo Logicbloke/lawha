@@ -45,6 +45,8 @@ export interface EngineEvents {
   /** a board's ACL changed: rooms and gates may need updating */
   'acl-changed': { board: string }
   'peer-authed': { board: string; pub: string; member: boolean }
+  /** a remote install connected or left (see sync.installs()) */
+  presence: Record<string, never>
 }
 
 export interface RoomSpec {
@@ -101,6 +103,14 @@ export class Engine {
       mayConnect: (board, pub) => this.mayConnect(board, pub),
       isMember: (board, pub) => this.isMember(board, pub),
       isKnownAuthor: (board, author) => this.boards.get(board)?.known.has(author) ?? false,
+      shareable: (pub) =>
+        [...this.boards.values()]
+          .filter((st) => !st.record.hidden && this.isMember(st.record.id, pub) && this.mayConnect(st.record.id, pub))
+          .map((st) => st.record.id),
+      accepts: (board, pub) => {
+        const st = this.boards.get(board)
+        return !!st && !st.record.hidden && this.mayConnect(board, pub)
+      },
       onIngested: (board, msgs) => this.bg(this.ingested(board, msgs)),
       onFork: (board) => this.bg(this.reloadForks(board)),
       onOrphans: (board) => {
@@ -108,8 +118,24 @@ export class Engine {
         if (st) this.bg(this.promoteOrphans(st))
       },
       onPeerAuthed: (board, pub, member) => this.events.emit('peer-authed', { board, pub, member }),
+      onPresence: () => this.events.emit('presence', {}),
     }
     this.sync = new SyncManager(host)
+    // what we hold or who is on it changed: shared connections may carry more
+    this.events.on('acl-changed', () => this.scheduleReoffer())
+    this.events.on('boards-changed', () => this.scheduleReoffer())
+  }
+
+  private reofferQueued = false
+  private scheduleReoffer(): void {
+    if (this.reofferQueued) return
+    this.reofferQueued = true
+    this.bg(
+      Promise.resolve().then(() => {
+        this.reofferQueued = false
+        this.sync.reoffer()
+      }),
+    )
   }
 
   private get db(): LawhaDb {

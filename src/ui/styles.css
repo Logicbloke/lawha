@@ -530,31 +530,95 @@ details.menu.side-cat-menu > summary {
   background: transparent;
 }
 
-.peer-status {
+/* the details panel spans the sidebar's foot, not the small summary */
+.side-meta {
+  position: relative;
+}
+details.menu.peer-status {
+  position: static;
+  min-width: 0;
+}
+details.menu.peer-status > summary {
+  width: auto;
+  height: auto;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  padding: 0.25rem 0.45rem;
   font-size: 0.8rem;
   color: var(--faint);
 }
-.dots {
+.net-dots {
   display: inline-flex;
   gap: 3px;
 }
-.dot {
+.net-dot {
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--faint);
 }
-.dot.connected {
+.net-dot.ok {
   background: var(--ok);
 }
-.dot.connecting {
+.net-dot.wait {
   background: var(--amber);
 }
-.dot.failed {
+.net-dot.off {
   background: var(--danger);
+}
+.net-warn {
+  flex: none;
+  color: var(--amber);
+}
+.menu-pop.up {
+  inset-block-start: auto;
+  inset-block-end: calc(100% + 4px);
+  inset-inline-start: 0;
+  inset-inline-end: auto;
+}
+.menu-pop.net-pop {
+  inset-inline: 0;
+  min-width: 0;
+  gap: 0.55rem;
+  padding: 0.8rem 0.9rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.net-pop h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.net-pop p {
+  margin: 0;
+}
+.net-blocked {
+  border-inline-start: 3px solid var(--amber);
+  padding-inline-start: 0.6rem;
+  color: var(--text);
+}
+.net-relays {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.net-relays li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.net-caption {
+  margin-bottom: -0.2rem;
+}
+.net-name {
+  color: var(--text);
+  min-width: 5.2rem;
 }
 
 .main {

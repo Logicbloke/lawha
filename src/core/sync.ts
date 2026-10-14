@@ -16,10 +16,18 @@ import type { AclContent, Envelope, ForkRecord, Identity, StoredMessage } from '
  * handshake cannot be relayed through a middleman. Logs are served only to
  * peers the board's current ACL says are members; data is accepted from any
  * authenticated peer, because every envelope is verified on its own.
+ *
+ * Two people rarely sit in the same board's room at the same moment, so
+ * once a connection is authenticated it also carries every other board the
+ * two share: one connection per remote install (its "carrier") offers the
+ * boards whose ACL names them, and each accepted board runs its own session
+ * (own handshake, own gate) wrapped in `mux` messages over that connection.
  */
 
-export type SyncAction = 'auth' | 'status' | 'have' | 'want' | 'msgs' | 'forks'
-export const SYNC_ACTIONS: SyncAction[] = ['auth', 'status', 'have', 'want', 'msgs', 'forks']
+export type SyncAction = 'auth' | 'status' | 'have' | 'want' | 'msgs' | 'forks' | 'offer' | 'mux'
+export const SYNC_ACTIONS: SyncAction[] = ['auth', 'status', 'have', 'want', 'msgs', 'forks', 'offer', 'mux']
+/** what a board session sends; `offer` and `mux` belong to the connection itself */
+const SESSION_ACTIONS = new Set<string>(['auth', 'status', 'have', 'want', 'msgs', 'forks'])
 
 /** What sync.ts sees of a transport — trivially mockable in tests. */
 export interface PeerChannel {
@@ -40,10 +48,16 @@ export interface SyncHost {
   isMember(board: string, pub: string): boolean
   /** has the board's ACL ever named this author (or are they the owner) */
   isKnownAuthor(board: string, author: string): boolean
+  /** boards to offer this key over a connection we already share: we hold them, their ACL names the key */
+  shareable(pub: string): string[]
+  /** take up a board this key offers: we hold it and its room would let them in */
+  accepts(board: string, pub: string): boolean
   onIngested(board: string, msgs: StoredMessage[]): void
   onFork(board: string, fork: ForkRecord): void
   onOrphans?(board: string): void
   onPeerAuthed?(board: string, pub: string, member: boolean): void
+  /** a remote install connected or went away */
+  onPresence?(): void
   onBadPeer?(key: string): void
 }
 
@@ -51,10 +65,13 @@ export const BATCH_SIZE = 50
 const MAX_RANGE = 1000
 const MAX_CHAINS = 2000
 const MAX_BAD = 10
+const MAX_OFFER = 500
 const AUTH_CTX = 'lawha-auth-v1'
 
 interface PeerState {
   ch: PeerChannel
+  /** a board session carried over another connection: that connection's key */
+  via: string | null
   nonce: string
   theirNonce: string | null
   theirSession: string | null
@@ -75,6 +92,10 @@ function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x)
 }
 
+/** the remote install a session talks to, once it proved its key */
+const installOf = (p: PeerState | undefined): string | null => (p?.authed ? `${p.pub}.${p.dev}` : null)
+const carriedKey = (via: string, board: string) => `${via}>${board}`
+
 function authBytes(
   board: string,
   pub: string,
@@ -88,6 +109,10 @@ function authBytes(
 export class SyncManager {
   readonly session: string
   private peers = new Map<string, PeerState>()
+  /** remote install → the connection that offers it our shared boards */
+  private carriers = new Map<string, string>()
+  /** connection → boards it offered that we did not hold yet */
+  private declined = new Map<string, Set<string>>()
 
   constructor(private host: SyncHost, session?: string) {
     this.session = session ?? toB64url(randomBytes(16))
@@ -97,10 +122,11 @@ export class SyncManager {
     return this.host.db()
   }
 
-  onPeerJoin(ch: PeerChannel): void {
+  onPeerJoin(ch: PeerChannel, via: string | null = null): void {
     const nonce = toB64url(randomBytes(16))
     this.peers.set(ch.key, {
       ch,
+      via,
       nonce,
       theirNonce: null,
       theirSession: null,
@@ -117,7 +143,28 @@ export class SyncManager {
   }
 
   onPeerLeave(key: string): void {
+    const gone = this.peers.get(key)
+    if (!gone) return
     this.peers.delete(key)
+    this.declined.delete(key)
+    // the sessions it carried end with it
+    for (const [k, p] of this.peers) if (p.via === key) this.peers.delete(k)
+    const who = gone.via ? null : installOf(gone)
+    if (!who) return
+    this.host.onPresence?.()
+    if (this.carriers.get(who) === key) {
+      this.carriers.delete(who)
+      const next = [...this.peers.values()].find((p) => !p.via && installOf(p) === who)
+      if (next) this.carriers.set(who, next.ch.key)
+    }
+    // whatever this connection covered goes over the carrier now
+    const carrier = this.peers.get(this.carriers.get(who) ?? '')
+    if (carrier) this.offer(carrier)
+  }
+
+  /** Connected remote installs (each counted once, however many rooms and transports). */
+  installs(): number {
+    return new Set([...this.peers.values()].filter((p) => !p.via).map(installOf).filter(Boolean)).size
   }
 
   peersOf(board: string): Array<{ key: string; pub: string | null; served: boolean; servesUs: boolean }> {
@@ -132,6 +179,10 @@ export class SyncManager {
     if (action === 'auth') return this.handleAuth(peer, payload)
     if (!peer.authed) return
     switch (action) {
+      case 'offer':
+        return this.handleOffer(peer, payload)
+      case 'mux':
+        return this.handleMux(peer, payload)
       case 'status':
         if (isObj(payload)) peer.servesUs = payload.member === 1
         return
@@ -154,6 +205,9 @@ export class SyncManager {
       if (!isB64(p.nonce, B64_16) || typeof p.session !== 'string') return
       peer.theirNonce = p.nonce
       peer.theirSession = p.session.slice(0, 64)
+      // ours may have reached them before they had the session (one they
+      // took up later, or a join they had not seen yet): say it once more
+      if (p.re !== 1) peer.ch.send('auth', { step: 'hi', nonce: peer.nonce, session: this.session, re: 1 })
       if (!peer.proofSent) this.sendProof(peer)
       return
     }
@@ -180,10 +234,93 @@ export class SyncManager {
         this.host.onBadPeer?.(peer.ch.key)
         return
       }
+      if (peer.via) {
+        // a carried session speaks for the install that carries it, no one else
+        const base = this.peers.get(peer.via)
+        if (!base || base.pub !== p.pub || base.dev !== p.dev) {
+          this.peers.delete(peer.ch.key)
+          return
+        }
+      }
       peer.pub = p.pub
       peer.dev = p.dev
       peer.authed = true
       void this.updateGate(peer)
+      if (!peer.via) {
+        this.host.onPresence?.()
+        const who = installOf(peer)!
+        if (!this.peers.has(this.carriers.get(who) ?? '')) {
+          this.carriers.set(who, peer.ch.key)
+          this.offer(peer)
+        }
+      }
+    }
+  }
+
+  // ---- shared boards over one connection ----
+
+  /** Offer, over a carrier, every shared board no session with that install covers yet. */
+  private offer(carrier: PeerState): void {
+    const who = installOf(carrier)
+    if (!who || carrier.via) return
+    const covered = new Set<string>()
+    for (const p of this.peers.values()) {
+      if ((p.via ? installOf(this.peers.get(p.via)) : installOf(p)) === who) covered.add(p.ch.board)
+    }
+    const boards = this.host
+      .shareable(carrier.pub!)
+      .filter((b) => !covered.has(b))
+      .slice(0, MAX_OFFER)
+    if (boards.length === 0) return
+    carrier.ch.send('offer', { boards })
+    for (const b of boards) this.openCarried(carrier, b)
+  }
+
+  private openCarried(base: PeerState, board: string): void {
+    const key = carriedKey(base.ch.key, board)
+    if (this.peers.has(key)) return
+    this.onPeerJoin(
+      {
+        key,
+        board,
+        send: (action, payload) => base.ch.send('mux', { b: board, a: action, p: payload }),
+        fingerprints: () => base.ch.fingerprints(),
+      },
+      base.ch.key,
+    )
+  }
+
+  private handleOffer(base: PeerState, p: unknown): void {
+    if (base.via || !isObj(p) || !Array.isArray(p.boards)) return
+    const declined = this.declined.get(base.ch.key) ?? new Set<string>()
+    for (const b of p.boards.slice(0, MAX_OFFER)) {
+      if (!isB64(b, B64_32) || b === base.ch.board || this.peers.has(carriedKey(base.ch.key, b))) continue
+      if (this.host.accepts(b, base.pub!)) this.openCarried(base, b)
+      else if (declined.size < MAX_OFFER) declined.add(b)
+    }
+    if (declined.size > 0) this.declined.set(base.ch.key, declined)
+  }
+
+  private handleMux(base: PeerState, p: unknown): Promise<void> | void {
+    if (base.via || !isObj(p) || typeof p.b !== 'string' || typeof p.a !== 'string' || !SESSION_ACTIONS.has(p.a)) return
+    const carried = this.peers.get(carriedKey(base.ch.key, p.b))
+    if (carried) return this.onMessage(carried.ch, p.a as SyncAction, p.p)
+  }
+
+  /** The boards we hold or their ACLs changed: take up offers we can now, offer what became shared. */
+  reoffer(): void {
+    for (const [key, boards] of this.declined) {
+      const base = this.peers.get(key)
+      if (!base) continue
+      for (const b of boards) {
+        if (!this.host.accepts(b, base.pub!)) continue
+        boards.delete(b)
+        this.openCarried(base, b)
+      }
+    }
+    for (const key of this.carriers.values()) {
+      const carrier = this.peers.get(key)
+      if (carrier) this.offer(carrier)
     }
   }
 
@@ -367,7 +504,7 @@ export class SyncManager {
   }
 
   private dropBad(peer: PeerState): void {
-    this.peers.delete(peer.ch.key)
+    this.onPeerLeave(peer.ch.key)
     this.host.onBadPeer?.(peer.ch.key)
   }
 

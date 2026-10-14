@@ -44,7 +44,7 @@ function NoAccess({ id, view }: { id: string; view: BoardView | null }) {
   useNow() // re-check peer status periodically
   const pub = me().pub
   const engine = getEngine()
-  const peers = engine.sync.peersOf(id)
+  const peers = [...new Set(engine.sync.peersOf(id).map((p) => p.pub))]
   const removed = !!view && view.owner !== null && view.myRole === 'none'
   const noRoom = engine.roomSpec(id) === null
   const [copied, setCopied] = useState(false)

@@ -242,6 +242,85 @@ describe('sync', () => {
   })
 })
 
+describe('shared boards over one connection', () => {
+  it('a connection in one board\'s room carries every other board the two share, live', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const x = await node()
+    const b1 = await makeBoard(o)
+    const b2 = await makeBoard(o)
+    await addCard(o, b2, 'on b2')
+    await grant(o, b1, x, 'editor')
+    await grant(o, b2, x, 'editor')
+    await x.e.follow(b1, null)
+    await x.e.follow(b2, null)
+    net.link(o.e, x.e, b1)
+    await net.settle()
+    expect(titles(x, b2)).toEqual(['on b2'])
+    await addCard(x, b2, 'from x')
+    await net.settle()
+    expect(titles(o, b2)).toEqual(['from x', 'on b2'])
+    expect(o.e.sync.installs()).toBe(1)
+  })
+
+  it('a board offered before the invitee had it is taken up once they follow it', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const x = await node()
+    const b1 = await makeBoard(o)
+    const b2 = await makeBoard(o)
+    await addCard(o, b2, 'later')
+    await grant(o, b1, x, 'editor')
+    await grant(o, b2, x, 'viewer')
+    await x.e.follow(b1, null)
+    net.link(o.e, x.e, b1)
+    await net.settle()
+    expect(x.e.records().map((r) => r.id)).not.toContain(b2)
+    await x.e.follow(b2, null) // opens the invite link while still connected
+    await net.settle()
+    expect(titles(x, b2)).toEqual(['later'])
+    expect(x.e.view(b2)!.myRole).toBe('viewer')
+  })
+
+  it('offers only boards the ACL names the peer on, so nothing leaks to a non-member', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const y = await node()
+    const shared = await makeBoard(o)
+    const secret = await makeBoard(o)
+    await addCard(o, secret, 'private')
+    await grant(o, shared, y, 'editor')
+    await y.e.follow(shared, null)
+    await y.e.follow(secret, null) // knows the id, is not on it
+    net.link(o.e, y.e, shared)
+    await net.settle()
+    expect(y.e.view(secret)!.resolved.order).toHaveLength(0)
+    expect(o.e.sync.peersOf(secret)).toHaveLength(0)
+  })
+
+  it('when the carrying connection goes, another one to the same install takes over', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const x = await node()
+    const [b1, b2, b3] = [await makeBoard(o), await makeBoard(o), await makeBoard(o)]
+    for (const b of [b1, b2, b3]) {
+      await grant(o, b, x, 'editor')
+      await x.e.follow(b, null)
+    }
+    const first = net.link(o.e, x.e, b1)
+    await net.settle()
+    net.link(o.e, x.e, b3)
+    await net.settle()
+    net.unlink(first)
+    await net.settle()
+    await addCard(o, b2, 'still flows')
+    await addCard(o, b1, 'b1 too')
+    await net.settle()
+    expect(titles(x, b2)).toEqual(['still flows'])
+    expect(titles(x, b1)).toEqual(['b1 too'])
+  })
+})
+
 describe('company workspaces', () => {
   it('a company board room exists only for roster members, and outsiders cannot connect', async () => {
     const net = new MockNet()
@@ -269,7 +348,34 @@ describe('company workspaces', () => {
     await net.settle()
     expect(a.e.view(b)!.name).toBe('Board')
     expect(outsider.e.view(b)!.resolved.order).toHaveLength(0)
-    expect(o.e.sync.peersOf(b).map((p) => p.pub)).toEqual([a.pub])
+    // a reaches b both in its room and over the workspace connection; the outsider in neither
+    expect([...new Set(o.e.sync.peersOf(b).map((p) => p.pub))]).toEqual([a.pub])
+  })
+
+  it('coworkers who meet in the workspace room sync the company boards they share', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const a = await node()
+    const outsider = await node()
+    const ws = await makeBoard(o, 'workspace')
+    await grant(o, ws, a, 'editor')
+    const b = await makeBoard(o, 'board', ws)
+    await addCard(o, b, 'company card')
+    await grant(o, b, a, 'editor')
+    await grant(o, b, outsider, 'editor') // on the board, but not in the company
+    await a.e.follow(ws, ws)
+    await a.e.follow(b, ws)
+    await outsider.e.follow(b, ws)
+    const personal = await makeBoard(o)
+    await grant(o, personal, outsider, 'editor')
+    await outsider.e.follow(personal, null)
+
+    net.link(o.e, a.e, ws) // nobody opened the board
+    net.link(o.e, outsider.e, personal)
+    await net.settle()
+    expect(titles(a, b)).toEqual(['company card'])
+    // the outsider shares a personal board with o, but company boards stay behind the roster
+    expect(outsider.e.view(b)!.resolved.order).toHaveLength(0)
   })
 
   it('removing a coworker rotates the company network secret', async () => {

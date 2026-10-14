@@ -41,9 +41,9 @@ Strict layering: `src/core/` has **no React imports**; `src/state/` bridges core
 - `boardcrypto.ts` — epochs (wraps + carried prev keys + key commitment), grants, padded op sealing with AAD bound to (board, author, dev, seq, epoch).
 - `board.ts` — `computeBoard()`: keys → epochs → decrypt → authorize → LWW fold. Op schema lives here.
 - `actions.ts` — builders returning `AppendItem`s; `log.appendBatch` signs them in one IndexedDB transaction.
-- `sync.ts` — per-board SyncManager: auth (nonces + DTLS fingerprints), serving gate, have/want/msgs, fork gossip, orphans, per-board batch queue.
+- `sync.ts` — per-board SyncManager: auth (nonces + DTLS fingerprints), serving gate, have/want/msgs, fork gossip, orphans, per-board batch queue. One authenticated connection per remote install is its *carrier*: it `offer`s every board whose ACL names that key, and each accepted board runs a full session (own handshake, own gate) inside `mux` messages.
 - `net.ts` — Trystero rooms per board per strategy; `engine.ts` — folds boards, implements SyncHost, room derivation (company boards via the workspace network secret), key healing.
-- `state/network.ts` — which rooms to join (open board, workspace, recent writes, a rotating sweep; capped).
+- `state/network.ts` — which rooms to join (open board, every workspace, recent writes, a rendezvous-hashed shared personal board per 90 s slot; capped), and the sidebar's network status.
 
 ## Invariants to respect
 
@@ -56,3 +56,4 @@ Strict layering: `src/core/` has **no React imports**; `src/state/` bridges core
 - All user content is rendered as text (XSS steals keys). Strict CSP is injected into production builds.
 - UI must work LTR and RTL; strings live in `src/ui/i18n.ts` and every language must cover every key (`tests/i18n.test.ts`). The board scroller stays `dir="ltr"` with `row-reverse` for Arabic (dnd-kit auto-scroll).
 - New files in `public/` must be added to `PUBLIC_PRECACHE` in vite.config.ts (service worker precache).
+- Never re-join a Trystero room id right after leaving it: `joinRoom` hands back the room that is still leaving and it dies ~100 ms later. `NetworkManager` waits on the leave (`leaving`); keep all joins going through it. Trystero's `onJoinError` reports per-peer trouble, not a failed join.

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { exportIdentity } from '../core/identity'
-import { endSession, identityEncrypted, me, sessionExpiry, useApp } from '../state/store'
+import { restartNetwork } from '../state/network'
+import { endSession, identityEncrypted, me, sessionExpiry, toast, useApp } from '../state/store'
+import { isTurnUrl, loadTurn, saveTurn } from '../state/turn'
 import { useT } from './i18n'
 import { QrCode } from './QrCode'
 
@@ -60,6 +62,8 @@ export function Security() {
         </section>
       )}
 
+      <TurnPanel />
+
       <section className="panel">
         <h2>{t('secProtectsTitle')}</h2>
         <ul>
@@ -84,5 +88,74 @@ export function Security() {
         {t('secVersion')} <bdi dir="ltr">{__APP_VERSION__}</bdi>
       </p>
     </div>
+  )
+}
+
+function TurnPanel() {
+  const t = useT()
+  const [saved, setSaved] = useState(loadTurn)
+  const [urls, setUrls] = useState(saved?.urls ?? '')
+  const [username, setUsername] = useState(saved?.username ?? '')
+  const [credential, setCredential] = useState(saved?.credential ?? '')
+  const [bad, setBad] = useState(false)
+  const apply = (next: typeof saved) => {
+    saveTurn(next)
+    setSaved(next)
+    restartNetwork()
+    toast(t('turnSaved'))
+  }
+  return (
+    <section className="panel">
+      <h2>{t('turnTitle')}</h2>
+      <p>{t('turnBody')}</p>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!isTurnUrl(urls)) return setBad(true)
+          apply({ urls: urls.trim(), username, credential })
+        }}
+      >
+        <label className="field">
+          <span>{t('turnUrl')}</span>
+          <input
+            dir="ltr"
+            value={urls}
+            placeholder="turn:turn.example.com:3478"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={bad || undefined}
+            onChange={(e) => (setUrls(e.target.value), setBad(false))}
+          />
+        </label>
+        {bad && <p className="error">{t('turnBadUrl')}</p>}
+        <label className="field">
+          <span>{t('turnUser')}</span>
+          <input dir="ltr" value={username} autoComplete="off" spellCheck={false} onChange={(e) => setUsername(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>{t('turnPass')}</span>
+          <input dir="ltr" type="password" value={credential} autoComplete="new-password" onChange={(e) => setCredential(e.target.value)} />
+        </label>
+        <div className="row">
+          <button type="submit" className="primary">
+            {t('save')}
+          </button>
+          {saved && (
+            <button
+              type="button"
+              onClick={() => {
+                setUrls('')
+                setUsername('')
+                setCredential('')
+                apply(null)
+              }}
+            >
+              {t('remove')}
+            </button>
+          )}
+        </div>
+      </form>
+    </section>
   )
 }

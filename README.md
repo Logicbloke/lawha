@@ -105,6 +105,17 @@ serves every member's log, which is how changes reach someone whose author
 is offline. Peers who sign conflicting histories are caught with a fork proof
 that is gossiped to everyone.
 
+Rooms are joined lazily: the open board, every company you are on, boards
+you wrote to recently, and one personal board you share with others, picked
+by rendezvous hashing so people who share boards land in the same room at
+the same time. Once two installs are connected in any room, that connection
+also carries every other board the two share (each with its own handshake
+and membership gate), so coworkers stay in sync on boards neither has open.
+The peer count in the sidebar counts people's devices, not connections; open
+it to see which discovery relays are reachable and whether direct connections
+are failing. Networks that block device-to-device connections (some office
+Wi-Fi, VPNs) need a TURN server, which you can set under Key & security.
+
 **Companies.** A company workspace is a roster with the same roles and
 encryption as a board. Its current key derives the company's network secret,
 which hides every company board's room: people who are not on the roster
@@ -130,7 +141,8 @@ Lawha defends against:
 Lawha does **not** defend against:
 
 - **IP exposure.** WebRTC reveals your IP address to the peers you connect
-  to. Use a VPN you trust if that matters.
+  to, and to the TURN server if you set one (it relays only encrypted
+  traffic). Use a VPN you trust if that matters.
 - **What removed members already had.** Someone removed keeps everything
   they could read before the removal, and changes written under the old key
   by members who had not yet seen the removal.
