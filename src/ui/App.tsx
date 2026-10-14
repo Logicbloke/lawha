@@ -10,6 +10,7 @@ import { Contacts } from './Contacts'
 import { JoinBoard } from './JoinBoard'
 import { Security } from './Security'
 import { UpdateBanner } from './UpdateBanner'
+import { UpdateToast } from './UpdateToast'
 import { Toasts } from './Toasts'
 
 function Main() {
@@ -69,7 +70,13 @@ export function App() {
   // the drawer closes on navigation (phone layout)
   useEffect(() => setDrawer(false), [route])
 
-  if (phase !== 'ready' || !identity) return <Onboarding phase={phase} />
+  if (phase !== 'ready' || !identity)
+    return (
+      <>
+        <Onboarding phase={phase} />
+        <UpdateToast />
+      </>
+    )
 
   return (
     <div className={`app ${drawer ? 'drawer-open' : ''}`}>
@@ -85,6 +92,7 @@ export function App() {
         <Main />
       </main>
       <Toasts />
+      <UpdateToast />
     </div>
   )
 }

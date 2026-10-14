@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './ui/App'
 import { initApp, setOnReady } from './state/store'
 import { startNetwork } from './state/network'
+import { registerServiceWorker } from './state/swUpdate'
 import './ui/styles.css'
 
 // Clickjacking guard: frame-ancestors cannot be delivered via <meta> CSP, so
@@ -18,9 +19,7 @@ void initApp()
 // PWA: sw.js is emitted only by the hosted production build; dev has no SW
 // and the single-file build runs from file://, where SWs are unavailable.
 if (import.meta.env.PROD && 'serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {})
-  })
+  registerServiceWorker()
 }
 
 createRoot(document.getElementById('root')!).render(

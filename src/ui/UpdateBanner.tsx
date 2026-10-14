@@ -12,7 +12,8 @@ const CHECK_TTL_MS = 6 * 60 * 60 * 1000 // re-check at most every 6h
 const FETCH_TIMEOUT_MS = 5000
 
 // The canonical hosted PWA auto-updates via its service worker on the next
-// online load, so a banner there would be misleading. Everywhere else —
+// online load (UpdateToast offers the reload to tabs left open), so a banner
+// there would be misleading. Everywhere else —
 // file://, self-hosted static, localhost — nothing pulls new code, so the
 // check is worth running.
 const IS_CANONICAL_HOST =
