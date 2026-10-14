@@ -44,6 +44,7 @@ Strict layering: `src/core/` has **no React imports**; `src/state/` bridges core
 - `sync.ts` — per-board SyncManager: auth (nonces + DTLS fingerprints), serving gate, have/want/msgs, fork gossip, orphans, per-board batch queue. One authenticated connection per remote install is its *carrier*: it `offer`s every board whose ACL names that key, and each accepted board runs a full session (own handshake, own gate) inside `mux` messages.
 - `net.ts` — Trystero rooms per board per strategy; `engine.ts` — folds boards, implements SyncHost, room derivation (company boards via the workspace network secret), key healing.
 - `state/network.ts` — which rooms to join (open board, every workspace, recent writes, a rendezvous-hashed shared personal board per 90 s slot; capped), and the sidebar's network status.
+- `state/notify.ts` — browser notifications, from the engine's `activity` event (ops by others that a fold applies for the first time). What to be told about is chosen per board and kept in localStorage only, never in a log.
 
 ## Invariants to respect
 
@@ -55,6 +56,7 @@ Strict layering: `src/core/` has **no React imports**; `src/state/` bridges core
 - Trystero is patched (`patches/`, via `bun patch`): rooms repeat announcements every 30 s, not 5.3 s, which got us rate-limited on relays. The patch is pinned to the version, so redo it when upgrading; `tests/net.test.ts` fails if it is lost.
 - A new sync action goes only to peers whose `hi` advertises it (as `look: 1` does): Trystero queues messages for an action the receiver never registered, unread and unbounded, so older installs would leak.
 - Batches for a board are processed sequentially in sync (`handleMsgs` queue); receive must treat a concurrently stored identical envelope as a duplicate, never a fork.
+- Mentions are plain text inside a comment, `@[name](pub)` (`core/mentions.ts`), so `comment.add` is unchanged and older installs still accept it.
 - All user content is rendered as text (XSS steals keys). Strict CSP is injected into production builds.
 - UI must work LTR and RTL; strings live in `src/ui/i18n.ts` and every language must cover every key (`tests/i18n.test.ts`). The board scroller stays `dir="ltr"` with `row-reverse` for Arabic (dnd-kit auto-scroll).
 - New files in `public/` must be added to `PUBLIC_PRECACHE` in vite.config.ts (service worker precache).

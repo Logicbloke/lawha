@@ -81,6 +81,7 @@ export function Security() {
           <li>{t('secN3')}</li>
           <li>{t('secN4')}</li>
           <li>{t('secN5')}</li>
+          <li>{t('secN6')}</li>
         </ul>
       </section>
 

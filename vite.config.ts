@@ -126,6 +126,20 @@ self.addEventListener('fetch', (e) => {
   // cached URL here is same-origin and content-hashed, so URL match is safe
   e.respondWith(caches.match(req, { ignoreVary: true }).then((hit) => hit ?? fetch(req)))
 })
+
+// a notification (state/notify.ts) was clicked: bring the app up on that card
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  const { board, card } = e.notification.data || {}
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const tab = list.find((c) => c.focused) || list[0]
+      if (!tab) return self.clients.openWindow(board ? './#/b/' + board : './')
+      tab.postMessage({ lawha: 'open', board, card })
+      return tab.focus()
+    }),
+  )
+})
 `,
       })
     },

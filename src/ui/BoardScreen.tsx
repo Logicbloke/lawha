@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -22,6 +22,7 @@ import { RANK } from '../core/types'
 import type { BoardView } from '../core/board'
 import { getEngine, me, navigate, useApp } from '../state/store'
 import { addColumn, archiveCards, moveCards, moveColumn, renameBoard } from '../state/actions'
+import { useNotify } from '../state/notify'
 import { useBoard, useNow, copyText } from './hooks'
 import { useT } from './i18n'
 import { Column } from './Column'
@@ -125,6 +126,14 @@ function Board({ view }: { view: BoardView }) {
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState(view.name)
   const [newCol, setNewCol] = useState('')
+
+  // a notification about a card of this board was clicked
+  const asked = useNotify((s) => s.open)
+  useEffect(() => {
+    if (asked?.board !== view.id) return
+    setOpenCard(asked.card)
+    useNotify.setState({ open: null })
+  }, [asked, view.id])
 
   const base = useMemo(
     () => new Map(view.columns.map((c) => [c.id, (view.byColumn.get(c.id) ?? []).map((x) => x.id)])),

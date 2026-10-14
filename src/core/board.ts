@@ -468,6 +468,8 @@ export interface BoardView {
   /** workspaces only: the key the company network secret derives from */
   netEpoch: { id: string; key: Uint8Array } | null
   stats: BoardStats
+  /** the content ops this fold applied, in fold order (what changed between two folds) */
+  ops: AppliedOp[]
   resolved: Resolved
 }
 
@@ -478,6 +480,14 @@ interface Applied {
   m: StoredMessage
   op: BoardOp
   lc: number
+}
+
+export interface AppliedOp {
+  /** the envelope's id */
+  id: string
+  author: string
+  ts: number
+  op: BoardOp
 }
 
 function orderCmp(a: Applied, b: Applied): number {
@@ -875,6 +885,7 @@ export function computeBoard(
       rejected,
       forkedDevices: new Set(forks.map((f) => `${f.author}.${f.dev}`)).size,
     },
+    ops: applied.map((a) => ({ id: a.m.id, author: a.m.author, ts: a.m.ts, op: a.op })),
     resolved: res,
   }
 }

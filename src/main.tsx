@@ -4,6 +4,7 @@ import { App } from './ui/App'
 import { initApp, setOnReady } from './state/store'
 import { startNetwork } from './state/network'
 import { startLooking } from './state/looking'
+import { startNotifications } from './state/notify'
 import { registerServiceWorker } from './state/swUpdate'
 import './ui/styles.css'
 
@@ -17,6 +18,7 @@ if (window.self !== window.top) {
 setOnReady((engine) => {
   startNetwork(engine)
   startLooking(engine)
+  startNotifications(engine)
 })
 void initApp()
 

@@ -573,3 +573,42 @@ describe('who has a card open', () => {
     expect(o.e.sync.lookers(b)).toEqual({})
   })
 })
+
+describe('activity', () => {
+  it('reports what others write once, never my own, nor what was there before I joined', async () => {
+    let t = 1_000_000
+    const now = () => t
+    const net = new MockNet()
+    const o = await node(now)
+    const x = await node(now)
+    const b = await makeBoard(o)
+    await addCard(o, b, 'old')
+    await grant(o, b, x, 'editor')
+    t += 1000
+    await x.e.follow(b, null)
+    const seen: string[] = []
+    x.e.events.on('activity', ({ board, items }) => {
+      for (const i of items) seen.push(`${board === b}:${i.op.k}:${i.author === o.pub}`)
+    })
+    net.link(o.e, x.e, b)
+    await net.settle()
+    expect(titles(x, b)).toEqual(['old'])
+    expect(seen).toEqual([]) // history from before the join
+
+    t += 1000
+    await addCard(o, b, 'new')
+    await net.settle()
+    expect(seen).toEqual(['true:card.create:true'])
+    await addCard(x, b, 'mine')
+    await net.settle()
+    expect(seen).toHaveLength(1)
+
+    // a restart folds it all again from storage: nothing is new
+    const again = new Engine(() => x.db, x.e.identity, toB64url(randomBytes(16)), { debounceMs: 0, now })
+    const later: unknown[] = []
+    again.events.on('activity', (a) => later.push(a))
+    await again.loadAll()
+    expect(again.view(b)!.cards.size).toBe(3)
+    expect(later).toEqual([])
+  })
+})

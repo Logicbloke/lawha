@@ -8,11 +8,12 @@ import { Modal } from './CardDetail'
 import { FieldSettings } from './FieldSettings'
 import { useT } from './i18n'
 import { LabelSettings } from './LabelSettings'
+import { NotifySettings } from './NotifySettings'
 
-/** Board-level actions: rename, labels, fields, your display name here, archive, leave. */
+/** Board-level actions: rename, labels, fields, notifications, your display name here, archive, leave. */
 export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): void }) {
   const t = useT()
-  const [panel, setPanel] = useState<'name' | 'labels' | 'fields' | 'category' | 'archive' | null>(null)
+  const [panel, setPanel] = useState<'name' | 'labels' | 'fields' | 'notify' | 'category' | 'archive' | null>(null)
   const [name, setName] = useState(view.profiles.get(me().pub) ?? '')
   // the same grouping as the sidebar: the board's workspace, or this device for personal boards
   const ws = getEngine().wsOf(view.id)
@@ -49,6 +50,7 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
               {t('category')}
             </button>
           )}
+          <button onClick={(e) => (close(e), setPanel('notify'))}>{t('notifications')}</button>
           <button onClick={(e) => (close(e), setPanel('name'))}>{t('myNameHere')}</button>
           <button onClick={(e) => (close(e), setPanel('archive'))}>
             {t('archivedItems', { n: view.archivedCards.length + view.archivedColumns.length })}
@@ -94,6 +96,12 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
       {panel === 'fields' && (
         <Modal label={t('cardFields')} onClose={() => setPanel(null)}>
           <FieldSettings view={view} onDone={() => setPanel(null)} />
+        </Modal>
+      )}
+
+      {panel === 'notify' && (
+        <Modal label={t('notifications')} onClose={() => setPanel(null)}>
+          <NotifySettings view={view} onDone={() => setPanel(null)} />
         </Modal>
       )}
 

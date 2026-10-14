@@ -4,7 +4,7 @@ import { concatBytes } from '@noble/hashes/utils.js'
 import { fromB64url, toB64url, utf8 } from './b64'
 import { boardIdFor } from './acl'
 import { rotateItem } from './actions'
-import { computeBoard, netSecret, type BoardView, type DecryptCache } from './board'
+import { computeBoard, netSecret, type AppliedOp, type BoardView, type DecryptCache } from './board'
 import { localKey, openLocal, sealLocal } from './boardcrypto'
 import {
   deleteOrphan,
@@ -49,6 +49,11 @@ export interface EngineEvents {
   presence: Record<string, never>
   /** someone opened or closed a card of this board (see sync.lookers()) */
   looks: { board: string }
+  /**
+   * ops written by someone else that this fold applied for the first time
+   * (never on load, nor for history from before we joined the board)
+   */
+  activity: { board: string; before: BoardView; items: AppliedOp[] }
 }
 
 export interface RoomSpec {
@@ -357,6 +362,7 @@ export class Engine {
   /** Fold, then react to ACL changes: gates, orphans, name cache, heal. */
   private refold(st: BoardState): void {
     const board = st.record.id
+    const before = st.view
     const view = computeBoard(board, [...st.msgs.values()], st.forks, this.identity, st.cache)
     st.view = view
     st.dirty = false
@@ -379,6 +385,14 @@ export class Engine {
     this.bg(this.cacheName(st))
     this.maybeHeal(st)
     this.events.emit('board-changed', { board })
+    if (before) this.reportActivity(st, before, view)
+  }
+
+  private reportActivity(st: BoardState, before: BoardView, view: BoardView): void {
+    const seen = new Set(before.ops.map((o) => o.id))
+    const me = this.identity.pub
+    const items = view.ops.filter((o) => !seen.has(o.id) && o.author !== me && o.ts >= st.record.joinedAt)
+    if (items.length > 0) this.events.emit('activity', { board: st.record.id, before, items })
   }
 
   private async cacheName(st: BoardState): Promise<void> {

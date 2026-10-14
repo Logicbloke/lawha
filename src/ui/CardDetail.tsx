@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { BoardView } from '../core/board'
 import { RANK } from '../core/types'
 import { getEngine, navigate, useApp } from '../state/store'
-import { addComment, updateCard } from '../state/actions'
-import { noteTyping, setOpenCard, useViewers, useWriters } from '../state/looking'
+import { updateCard } from '../state/actions'
+import { setOpenCard, useViewers, useWriters } from '../state/looking'
 import { formatRelative, shortKey, useNow } from './hooks'
 import { byName, CardFields } from './CardFields'
+import { CommentBox, CommentText } from './Comments'
 import { Identicon } from './Identicon'
 import { useT } from './i18n'
 
@@ -63,7 +64,6 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
   const canEdit = RANK[view.myRole] >= RANK.editor && card.movedTo === null
   const [title, setTitle] = useState(card.title)
   const [desc, setDesc] = useState(card.desc)
-  const [comment, setComment] = useState('')
   const viewers = useViewers(view.id, cardId)
   // only those who may comment: anything else is a modified client
   const writers = useWriters(view.id, cardId).filter((p) => view.members.some((m) => m.pub === p && RANK[m.role] >= RANK.editor))
@@ -162,38 +162,13 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
                       {formatRelative(c.imported?.ts ?? c.ts, now, lang)}
                     </time>
                   </span>
-                  <p className="comment-text">{c.text}</p>
+                  <CommentText text={c.text} view={view} />
                 </div>
               </li>
             ))}
             {card.comments.length === 0 && <li className="muted">{t('noComments')}</li>}
           </ul>
-          {canEdit && (
-            <form
-              className="comment-form"
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (comment.trim()) void addComment(view.id, card.id, comment.trim())
-                setComment('')
-                noteTyping('')
-              }}
-            >
-              <textarea
-                value={comment}
-                rows={2}
-                maxLength={4000}
-                placeholder={t('writeComment')}
-                aria-label={t('writeComment')}
-                onChange={(e) => {
-                  setComment(e.target.value)
-                  noteTyping(e.target.value)
-                }}
-              />
-              <button className="primary" disabled={!comment.trim()}>
-                {t('comment')}
-              </button>
-            </form>
-          )}
+          {canEdit && <CommentBox view={view} cardId={card.id} />}
           <p className="writing-note" aria-live="polite">
             {writers.length > 0 &&
               t('writingComment', { names: new Intl.ListFormat(lang).format(writers.map(nameOf)), n: writers.length })}

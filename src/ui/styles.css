@@ -1299,6 +1299,56 @@ textarea.detail-title:hover {
 .comment-form textarea {
   width: 100%;
 }
+.mention-wrap {
+  position: relative;
+  width: 100%;
+}
+.mention-list {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: calc(100% + 4px);
+  z-index: 30;
+  min-width: 14rem;
+  max-width: 100%;
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem;
+  background: var(--slate);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lift);
+}
+.mention-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.mention-list li.on {
+  background: var(--slate-2);
+}
+.mention-list bdi {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-key {
+  margin-inline-start: auto;
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+.mention {
+  color: var(--focus);
+  font-weight: 600;
+}
+.mention.me {
+  background: color-mix(in srgb, var(--focus) 18%, transparent);
+  border-radius: 4px;
+  padding: 0 0.15rem;
+}
 .writing-note {
   min-height: 1.3em;
   margin: 0.4rem 0 0;
@@ -1320,6 +1370,42 @@ textarea.detail-title:hover {
   opacity: 1;
   outline: 2px solid var(--c);
   outline-offset: 1px;
+}
+.notify-settings fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.notify-settings legend {
+  padding: 0;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+}
+.notify-settings fieldset:disabled .check-row {
+  opacity: 0.55;
+}
+.notify-settings .notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.notify-settings .notice p {
+  margin: 0;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.25rem 0;
+}
+.check-row input {
+  accent-color: var(--amber);
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  flex: none;
 }
 .label-defs {
   list-style: none;
