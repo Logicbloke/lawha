@@ -3,7 +3,7 @@ import type { BoardView } from '../core/board'
 import { RANK } from '../core/types'
 import { getEngine, navigate, useApp } from '../state/store'
 import { addComment, updateCard } from '../state/actions'
-import { setOpenCard, useViewers } from '../state/looking'
+import { noteTyping, setOpenCard, useViewers, useWriters } from '../state/looking'
 import { formatRelative, shortKey, useNow } from './hooks'
 import { byName, CardFields } from './CardFields'
 import { Identicon } from './Identicon'
@@ -65,6 +65,8 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
   const [desc, setDesc] = useState(card.desc)
   const [comment, setComment] = useState('')
   const viewers = useViewers(view.id, cardId)
+  // only those who may comment: anything else is a modified client
+  const writers = useWriters(view.id, cardId).filter((p) => view.members.some((m) => m.pub === p && RANK[m.role] >= RANK.editor))
 
   useEffect(() => {
     setOpenCard({ board: view.id, card: cardId })
@@ -173,6 +175,7 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
                 e.preventDefault()
                 if (comment.trim()) void addComment(view.id, card.id, comment.trim())
                 setComment('')
+                noteTyping('')
               }}
             >
               <textarea
@@ -181,13 +184,20 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
                 maxLength={4000}
                 placeholder={t('writeComment')}
                 aria-label={t('writeComment')}
-                onChange={(e) => setComment(e.target.value)}
+                onChange={(e) => {
+                  setComment(e.target.value)
+                  noteTyping(e.target.value)
+                }}
               />
               <button className="primary" disabled={!comment.trim()}>
                 {t('comment')}
               </button>
             </form>
           )}
+          <p className="writing-note" aria-live="polite">
+            {writers.length > 0 &&
+              t('writingComment', { names: new Intl.ListFormat(lang).format(writers.map(nameOf)), n: writers.length })}
+          </p>
         </div>
 
         <aside className="detail-side">

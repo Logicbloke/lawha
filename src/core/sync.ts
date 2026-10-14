@@ -29,6 +29,8 @@ import type { AclContent, Envelope, ForkRecord, Identity, StoredMessage } from '
  * and lapses after LOOK_TTL_MS without a repeat or when the connection goes.
  * It goes only to peers whose `hi` says they take it: Trystero queues
  * messages for an action a peer never registered, unread and forever.
+ * `typing: 1` in it means they are writing a comment on that card; it is
+ * said again as soon as that stops (installs from before it ignore it).
  */
 
 export type SyncAction = 'auth' | 'status' | 'have' | 'want' | 'msgs' | 'forks' | 'look' | 'offer' | 'mux'
@@ -103,7 +105,7 @@ interface PeerState {
   /** their `hi` said they take `look` messages */
   looks: boolean
   /** the card they have open on this board, and when they last said so */
-  look: { card: string; at: number } | null
+  look: { card: string; at: number; typing: boolean } | null
 }
 
 function isObj(x: unknown): x is Record<string, unknown> {
@@ -132,7 +134,7 @@ export class SyncManager {
   /** connection → boards it offered that we did not hold yet */
   private declined = new Map<string, Set<string>>()
   /** the card we have open, announced to its board's members */
-  private myLook: { board: string; card: string } | null = null
+  private myLook: { board: string; card: string; typing?: boolean } | null = null
 
   constructor(private host: SyncHost, session?: string) {
     this.session = session ?? toB64url(randomBytes(16))
@@ -411,8 +413,8 @@ export class SyncManager {
 
   // ---- who has which card open ----
 
-  /** Announce the card we have open (null: none) to the members of its board. */
-  look(target: { board: string; card: string } | null): void {
+  /** Announce the card we have open (null: none), and whether we are writing a comment on it, to the members of its board. */
+  look(target: { board: string; card: string; typing?: boolean } | null): void {
     const prev = this.myLook
     this.myLook = target
     if (prev && prev.board !== target?.board) this.sendLook(prev.board)
@@ -420,9 +422,10 @@ export class SyncManager {
   }
 
   private sendLook(board: string, only?: PeerState): void {
-    const card = this.myLook?.board === board ? this.myLook.card : null
+    const mine = this.myLook?.board === board ? this.myLook : null
+    const msg = mine?.typing ? { card: mine.card, typing: 1 } : { card: mine?.card ?? null }
     for (const p of only ? [only] : this.peers.values()) {
-      if (p.ch.board === board && p.served && p.looks) p.ch.send('look', { card })
+      if (p.ch.board === board && p.served && p.looks) p.ch.send('look', msg)
     }
   }
 
@@ -430,17 +433,27 @@ export class SyncManager {
     // from current members only, like the logs we serve
     if (!peer.served || !isObj(p)) return
     if (p.card !== null && !isB64(p.card, B64_16)) return
-    peer.look = p.card === null ? null : { card: p.card, at: this.now() }
+    peer.look = p.card === null ? null : { card: p.card, at: this.now(), typing: p.typing === 1 }
     this.host.onLooks?.(peer.ch.board)
   }
 
   /** Card → the other people (pubs, each once, sorted) who have it open on this board. */
   lookers(board: string): Record<string, string[]> {
+    return this.byCard(board, false)
+  }
+
+  /** Card → the other people (pubs, each once, sorted) writing a comment on it. */
+  writers(board: string): Record<string, string[]> {
+    return this.byCard(board, true)
+  }
+
+  private byCard(board: string, typing: boolean): Record<string, string[]> {
     const now = this.now()
     const me = this.host.identity.pub
     const byCard = new Map<string, Set<string>>()
     for (const p of this.peers.values()) {
       if (p.ch.board !== board || !p.served || !p.look || p.pub === me || now - p.look.at > LOOK_TTL_MS) continue
+      if (typing && !p.look.typing) continue
       const set = byCard.get(p.look.card) ?? new Set<string>()
       set.add(p.pub!)
       byCard.set(p.look.card, set)

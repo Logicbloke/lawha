@@ -464,6 +464,25 @@ describe('who has a card open', () => {
     expect(o.e.sync.lookers(b)).toEqual({})
   })
 
+  it('members see who is writing a comment, until they stop', async () => {
+    const { net, o, x, b, card } = await shared()
+    net.link(o.e, x.e, b)
+    await net.settle()
+    x.e.sync.look({ board: b, card, typing: true })
+    await net.settle()
+    expect(o.e.sync.writers(b)).toEqual({ [card]: [x.pub] })
+    expect(o.e.sync.lookers(b)).toEqual({ [card]: [x.pub] }) // writing is viewing too
+    x.e.sync.look({ board: b, card })
+    await net.settle()
+    expect(o.e.sync.writers(b)).toEqual({})
+    expect(o.e.sync.lookers(b)).toEqual({ [card]: [x.pub] })
+    x.e.sync.look({ board: b, card, typing: true })
+    await net.settle()
+    x.e.sync.look(null) // closing the card stops it too
+    await net.settle()
+    expect(o.e.sync.writers(b)).toEqual({})
+  })
+
   it('a member who connects later is told what is already open', async () => {
     const { net, o, x, b, card } = await shared()
     o.e.sync.look({ board: b, card })

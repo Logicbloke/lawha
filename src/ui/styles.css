@@ -1299,6 +1299,13 @@ textarea.detail-title:hover {
 .comment-form textarea {
   width: 100%;
 }
+.writing-note {
+  min-height: 1.3em;
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--muted);
+}
 .label-picker {
   display: flex;
   flex-wrap: wrap;

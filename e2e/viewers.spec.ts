@@ -27,6 +27,22 @@ test('people see who else has a card open, live', async ({ browser }) => {
   await expect(a.locator('.detail-viewers')).toContainText(`Also viewing${bobKey.slice(0, 8)}`)
   await expect(b.locator('.detail-viewers')).toContainText('Also viewing')
 
+  // Bob writes a comment: Alice sees it under her comment box until he sends it
+  const writing = a.locator('.writing-note')
+  await b.getByPlaceholder('Write a comment').fill('Draft is in the doc')
+  await expect(writing).toHaveText(`${bobKey.slice(0, 8)} is writing a comment…`)
+  await b.getByPlaceholder('Write a comment').fill('')
+  await expect(writing).toHaveText('')
+  await b.getByPlaceholder('Write a comment').fill('Draft is in the doc')
+  await expect(writing).toHaveText(`${bobKey.slice(0, 8)} is writing a comment…`)
+  await b.getByRole('button', { name: 'Comment', exact: true }).click()
+  await expect(writing).toHaveText('')
+  await expect(a.locator('.comment-text')).toHaveText('Draft is in the doc')
+  // and stops showing once he pauses
+  await b.getByPlaceholder('Write a comment').fill('One more')
+  await expect(writing).not.toHaveText('')
+  await expect(writing).toHaveText('', { timeout: 10_000 })
+
   // Bob closes it: gone on Alice's side
   await b.keyboard.press('Escape')
   await expect(a.locator('.detail-viewers')).toHaveCount(0)
