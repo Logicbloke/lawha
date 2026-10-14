@@ -15,7 +15,7 @@ import { formatDate, shortKey } from './hooks'
 import { Identicon } from './Identicon'
 import { useT, type TKey } from './i18n'
 
-export const byName = (a: FieldDef, b: FieldDef) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)
+export const byName = (a: { id: string; name: string }, b: { id: string; name: string }) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1)
 
 /**
  * The values a card holds. Only the entries added to this card show; "Add

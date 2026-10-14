@@ -7,11 +7,12 @@ import { getEngine, me } from '../state/store'
 import { Modal } from './CardDetail'
 import { FieldSettings } from './FieldSettings'
 import { useT } from './i18n'
+import { LabelSettings } from './LabelSettings'
 
-/** Board-level actions: rename, your display name here, archive, leave. */
+/** Board-level actions: rename, labels, fields, your display name here, archive, leave. */
 export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): void }) {
   const t = useT()
-  const [panel, setPanel] = useState<'name' | 'fields' | 'category' | 'archive' | null>(null)
+  const [panel, setPanel] = useState<'name' | 'labels' | 'fields' | 'category' | 'archive' | null>(null)
   const [name, setName] = useState(view.profiles.get(me().pub) ?? '')
   // the same grouping as the sidebar: the board's workspace, or this device for personal boards
   const ws = getEngine().wsOf(view.id)
@@ -35,6 +36,7 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
           {isAdmin && (
             <button onClick={(e) => (close(e), onRename())}>{t('renameBoard')}</button>
           )}
+          {canEdit && <button onClick={(e) => (close(e), setPanel('labels'))}>{t('labels')}</button>}
           {isAdmin && <button onClick={(e) => (close(e), setPanel('fields'))}>{t('cardFields')}</button>}
           {grouping.canManage && grouping.categories.length > 0 && (
             <button
@@ -80,6 +82,12 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
             <input autoFocus value={name} maxLength={80} aria-label={t('displayName')} onChange={(e) => setName(e.target.value)} />
             <button className="primary">{t('save')}</button>
           </form>
+        </Modal>
+      )}
+
+      {panel === 'labels' && (
+        <Modal label={t('labels')} onClose={() => setPanel(null)}>
+          <LabelSettings view={view} onDone={() => setPanel(null)} />
         </Modal>
       )}
 

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { LABEL_COLORS, type BoardView, type LabelColor } from '../core/board'
+import type { BoardView } from '../core/board'
 import { RANK } from '../core/types'
 import { getEngine, navigate, useApp } from '../state/store'
-import { addComment, setLabel, updateCard } from '../state/actions'
+import { addComment, updateCard } from '../state/actions'
 import { setOpenCard, useViewers } from '../state/looking'
 import { formatRelative, shortKey, useNow } from './hooks'
-import { CardFields } from './CardFields'
+import { byName, CardFields } from './CardFields'
 import { Identicon } from './Identicon'
 import { useT } from './i18n'
 
@@ -64,8 +64,6 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
   const [title, setTitle] = useState(card.title)
   const [desc, setDesc] = useState(card.desc)
   const [comment, setComment] = useState('')
-  const [newLabel, setNewLabel] = useState('')
-  const [newColor, setNewColor] = useState<LabelColor>('blue')
   const viewers = useViewers(view.id, cardId)
 
   useEffect(() => {
@@ -81,7 +79,7 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
     if (document.activeElement !== descRef.current) setDesc(card.desc)
   }, [card.title, card.desc])
 
-  const labels = [...view.labels.values()].filter((l) => !l.archived)
+  const labels = [...view.labels.values()].filter((l) => !l.archived).sort(byName)
   const col = view.columns.find((c) => c.id === card.col)
   const nameOf = (pub: string) => view.profiles.get(pub) || shortKey(pub)
   const toggleIn = (list: string[], x: string) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x])
@@ -193,53 +191,30 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
         </div>
 
         <aside className="detail-side">
-          <h3>{t('labels')}</h3>
-          <div className="label-picker">
-            {labels.map((l) => (
-              <button
-                key={l.id}
-                className={`label-chip c-${l.color} ${card.labels.includes(l.id) ? 'on' : ''}`}
-                aria-pressed={card.labels.includes(l.id)}
-                disabled={!canEdit}
-                onClick={() => void updateCard(view.id, card.id, { labels: toggleIn(card.labels, l.id) })}
-              >
-                {l.name}
-              </button>
-            ))}
-          </div>
-          {canEdit && (
-            <form
-              className="new-label"
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (!newLabel.trim()) return
-                void setLabel(view.id, { name: newLabel.trim(), color: newColor }).then((id) => {
-                  if (id) void updateCard(view.id, card.id, { labels: [...card.labels, id] })
-                })
-                setNewLabel('')
-              }}
-            >
-              <input
-                value={newLabel}
-                maxLength={80}
-                placeholder={t('newLabel')}
-                aria-label={t('newLabel')}
-                onChange={(e) => setNewLabel(e.target.value)}
-              />
-              <div className="swatches" role="radiogroup" aria-label={t('labelColor')}>
-                {LABEL_COLORS.map((c) => (
+          {labels.length > 0 ? (
+            <>
+              <h3>{t('labels')}</h3>
+              <div className="label-picker">
+                {labels.map((l) => (
                   <button
-                    type="button"
-                    key={c}
-                    role="radio"
-                    aria-checked={newColor === c}
-                    aria-label={t(`color_${c}`)}
-                    className={`swatch c-${c} ${newColor === c ? 'on' : ''}`}
-                    onClick={() => setNewColor(c)}
-                  />
+                    key={l.id}
+                    className={`label-chip c-${l.color} ${card.labels.includes(l.id) ? 'on' : ''}`}
+                    aria-pressed={card.labels.includes(l.id)}
+                    disabled={!canEdit}
+                    onClick={() => void updateCard(view.id, card.id, { labels: toggleIn(card.labels, l.id) })}
+                  >
+                    {l.name}
+                  </button>
                 ))}
               </div>
-            </form>
+            </>
+          ) : (
+            canEdit && (
+              <>
+                <h3>{t('labels')}</h3>
+                <p className="hint">{t('noLabelsDefined')}</p>
+              </>
+            )
           )}
 
           <h3>{t('assignees')}</h3>

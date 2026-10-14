@@ -1314,10 +1314,27 @@ textarea.detail-title:hover {
   outline: 2px solid var(--c);
   outline-offset: 1px;
 }
+.label-defs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.label-def,
 .new-label {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+.label-def {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.label-def input,
+.new-label input {
+  flex: 1 1 9rem;
+  min-width: 0;
+  border-inline-start: 4px solid var(--c);
 }
 .swatches {
   display: flex;
