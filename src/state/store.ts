@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { randomBytes } from '@noble/hashes/utils.js'
 import { toB64url } from '../core/b64'
 import {
+  deleteLawhaDb,
   getDeviceRecord,
   getIdentityRecord,
   openLawhaDb,
@@ -173,8 +174,11 @@ export function toast(text: string, kind: Toast['kind'] = 'info'): void {
 
 let db: LawhaDb | null = null
 let opening: Promise<LawhaDb> | null = null
+/** the database is being deleted: nothing may open it again */
+let wiping = false
 
 function openDb(): Promise<LawhaDb> {
+  if (wiping) return Promise.reject(new Error('deleting'))
   if (db) return Promise.resolve(db)
   if (opening) return opening
   opening = openLawhaDb('lawha', () => {
@@ -194,6 +198,33 @@ function openDb(): Promise<LawhaDb> {
 export function getDb(): LawhaDb {
   if (!db) throw new Error('db not ready')
   return db
+}
+
+/**
+ * Delete everything Lawha keeps in this browser, then start over: the
+ * database (key, device, boards, files, sessions) and Lawha's localStorage
+ * entries. Other devices and members keep their copies. Never all of the
+ * origin's storage: the owner's other github.io pages (Shabaka) share it.
+ */
+export async function wipeThisBrowser(onBlocked: () => void): Promise<void> {
+  wiping = true
+  const open = db ?? (await opening?.catch(() => null)) ?? null
+  db = null
+  open?.close()
+  try {
+    await deleteLawhaDb('lawha', onBlocked)
+  } catch (e) {
+    // still there: carry on with it
+    wiping = false
+    await openDb()
+    throw e
+  }
+  try {
+    for (const k of Object.keys(localStorage)) if (/^lawha[-:]/.test(k)) localStorage.removeItem(k)
+  } catch {
+    // storage disabled: nothing of ours is in it
+  }
+  location.replace(location.pathname + location.search)
 }
 
 // ---- engine ----

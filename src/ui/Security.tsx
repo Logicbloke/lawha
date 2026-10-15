@@ -6,6 +6,7 @@ import { endSession, getEngine, identityEncrypted, me, sessionExpiry, toast, use
 import { isTurnUrl, loadTurn, saveTurn } from '../state/turn'
 import { useT } from './i18n'
 import { QrCode } from './QrCode'
+import { WipeButton } from './WipeButton'
 
 export function Security() {
   const identity = me()
@@ -91,6 +92,12 @@ export function Security() {
           <li>{t('secN5')}</li>
           <li>{t('secN6')}</li>
         </ul>
+      </section>
+
+      <section className="panel">
+        <h2>{t('wipeTitle')}</h2>
+        <p>{t('wipeBody')}</p>
+        <WipeButton />
       </section>
 
       <p className="app-version">

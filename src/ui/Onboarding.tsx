@@ -3,6 +3,7 @@ import { commitIdentity, importAndCommit, prepareIdentity, unlock, useApp, type 
 import { translateError, useT, type TKey } from './i18n'
 import { LangPicker } from './LangPicker'
 import { QrScanner, qrScanSupported } from './QrScanner'
+import { WipeButton } from './WipeButton'
 import { SESSION_DURATIONS, sessionsSupported } from '../core/session'
 import type { Identity } from '../core/types'
 
@@ -109,6 +110,8 @@ export function Onboarding({ phase }: { phase: Phase }) {
           </button>
         </form>
         {error && <p className="error">{error}</p>}
+        <p className="hint">{t('wipeLockedHint')}</p>
+        <WipeButton />
       </Shell>
     )
   }

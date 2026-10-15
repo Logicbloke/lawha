@@ -63,4 +63,5 @@ Strict layering: `src/core/` has **no React imports**; `src/state/` bridges core
 - All user content is rendered as text (XSS steals keys). Strict CSP is injected into production builds.
 - UI must work LTR and RTL; strings live in `src/ui/i18n.ts` and every language must cover every key (`tests/i18n.test.ts`). The board scroller stays `dir="ltr"` with `row-reverse` for Arabic (dnd-kit auto-scroll).
 - New files in `public/` must be added to `PUBLIC_PRECACHE` in vite.config.ts (service worker precache).
+- The origin (logicbloke.github.io) is shared with the owner's other Pages apps (Shabaka). `wipeThisBrowser` (state/store.ts) deletes only the `lawha` IndexedDB database and localStorage keys starting `lawha-` or `lawha:`, so every new key must use one of those prefixes; never `localStorage.clear()` or Clear-Site-Data.
 - Never re-join a Trystero room id right after leaving it: `joinRoom` hands back the room that is still leaving and it dies ~100 ms later. `NetworkManager` waits on the leave (`leaving`); keep all joins going through it. Trystero's `onJoinError` reports per-peer trouble, not a failed join.

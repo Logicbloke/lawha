@@ -63,7 +63,10 @@ A Shabaka key backup works here too and keeps the same identity.
 
 **Identity.** An Ed25519 keypair generated in your browser; the public key is
 you. Back it up as one line of text; optionally encrypt it at rest with a
-passphrase (scrypt + XChaCha20-Poly1305).
+passphrase (scrypt + XChaCha20-Poly1305). Key & security (and the unlock
+screen, for a forgotten passphrase) can delete everything Lawha keeps in
+this browser; your other devices and the people you share boards with keep
+their copies.
 
 **Logs.** Every change is an envelope in an append-only log, signed and
 hash-chained to the previous one. There is one chain per *(board, person,

@@ -1,4 +1,4 @@
-import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
+import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type {
   BlobRecord,
   BoardRecord,
@@ -92,6 +92,11 @@ export function openLawhaDb(name = 'lawha', onTerminated?: () => void): Promise<
       }
     },
   })
+}
+
+/** Delete the whole database, every store; `blocked` runs while another connection keeps it open. */
+export function deleteLawhaDb(name = 'lawha', blocked?: () => void): Promise<void> {
+  return deleteDB(name, { blocked })
 }
 
 // ---- logs ----
