@@ -2,6 +2,7 @@ import { B64_32 } from '../core/b64'
 import { isB64 } from '../core/validate'
 import {
   ActionError,
+  attachOp,
   carryFields,
   createBoardItems,
   leaveItem,
@@ -15,6 +16,8 @@ import {
   setRoleItem,
 } from '../core/actions'
 import { MAX_OP_JSON, opJsonSize } from '../core/boardcrypto'
+import { MAX_FILE, PIECE_SIZE, sealFile } from '../core/blobcrypto'
+import { sniff } from '../core/sniff'
 import {
   LABEL_COLORS,
   positionsAt,
@@ -30,6 +33,7 @@ import { deleteContact, getContacts, putContact } from '../core/db'
 import type { ContactRecord, Role } from '../core/types'
 import { getDb, getEngine, me, navigate, setWorkspace, toast, useApp } from './store'
 import { grouping, localCategories, saveLocalCategories } from './categories'
+import { makePreview, trackUpload } from './attachments'
 import { translate, type TKey } from '../ui/i18n'
 
 /** User-facing actions. Errors become toasts in the user's language. */
@@ -52,7 +56,9 @@ async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
             ? 'errNotSynced'
             : msg === 'op too large'
               ? 'errTooLarge'
-              : 'errGeneric'
+              : e instanceof DOMException && e.name === 'QuotaExceededError'
+                ? 'errStorageFull'
+                : 'errGeneric'
     toast(t(key), 'error')
     if (!(e instanceof ActionError)) console.warn(e)
     return undefined
@@ -188,6 +194,38 @@ export function fieldsLostOnMove(src: BoardView, dst: BoardView, ids: string[]):
 
 export const addComment = (board: string, card: string, text: string) =>
   run(() => op(board, { k: 'comment.add', id: newEntityId(), card, text, imported: null }))
+
+// ---- attachments ----
+
+const pause = () => new Promise<void>((r) => setTimeout(r, 0))
+
+/**
+ * Put files on a card: each is sealed and its pieces stored here first, then
+ * the op goes out; members fetch the pieces from whoever has them.
+ */
+export async function attachFiles(board: string, card: string, files: File[]): Promise<void> {
+  for (const file of files) {
+    if (file.size > MAX_FILE) {
+      toast(t('attachTooBig', { name: file.name, max: Math.round(MAX_FILE / (1024 * 1024)) }), 'error')
+      continue
+    }
+    await run(() =>
+      trackUpload(card, file.name, async () => {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const preview = await makePreview(file, sniff(bytes.subarray(0, 64)))
+        const sealed = await sealFile(bytes, PIECE_SIZE, pause)
+        const o = attachOp(card, { name: file.name, mime: file.type, size: bytes.length, ps: PIECE_SIZE, sealed, ...preview })
+        const engine = getEngine()
+        await engine.blobs.put(sealed.root, sealed.pieces.length, sealed.pieces.map((p, i) => [i, p] as [number, Uint8Array]), true)
+        engine.swarm.markComplete(sealed.root)
+        await op(board, o)
+      }),
+    )
+  }
+}
+
+export const removeAttachment = (board: string, card: string, id: string) =>
+  run(() => op(board, { k: 'attach.remove', id, card }))
 
 export function setLabel(
   board: string,

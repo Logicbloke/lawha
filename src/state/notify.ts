@@ -114,7 +114,7 @@ export function notesFor(items: AppliedOp[], before: BoardView, after: BoardView
     for (const o of after.ops) {
       if (o.author !== me) continue
       if (o.op.k === 'card.create' || o.op.k === 'card.update') involved.add(o.op.id)
-      if (o.op.k === 'comment.add' || o.op.k === 'entry.set') involved.add(o.op.card)
+      if (o.op.k === 'comment.add' || o.op.k === 'entry.set' || o.op.k === 'attach.add') involved.add(o.op.card)
     }
   }
   const wants = (card: string, cols: string[]) => {
@@ -160,7 +160,11 @@ export function notesFor(items: AppliedOp[], before: BoardView, after: BoardView
         break
       }
       case 'entry.set':
+      case 'attach.remove':
         if (wants(op.card, colsOf(op.card))) add(op.card, 'nfEdited')
+        break
+      case 'attach.add':
+        if (wants(op.card, colsOf(op.card))) add(op.card, 'nfAttached', { name: op.name })
         break
       case 'board.update':
       case 'column.create':

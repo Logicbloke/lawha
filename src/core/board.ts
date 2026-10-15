@@ -3,6 +3,8 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import { B64_16, B64_32, fromB64url, isCanonicalB64url, toB64url, utf8 } from './b64'
 import { canWrite, isAclValid, resolve, type Resolved } from './acl'
+import { HASH_BYTES, MAX_PIECE, MAX_PIECES, MIN_PIECE, pieceCount, rootOf } from './blobcrypto'
+import { b64Len } from './validate'
 import {
   keyCommitment,
   openCarried,
@@ -40,6 +42,11 @@ export type LabelColor = (typeof LABEL_COLORS)[number]
 export const MAX_FIELD_TEXT = 1000
 export const MAX_URL = 2000
 export const MAX_OPTIONS = 50
+export const MAX_FILE_NAME = 255
+export const MAX_MIME = 100
+/** raw bytes of an attachment's inline preview */
+export const MAX_THUMB = 4096
+export const MAX_DIM = 20000
 export const FIELD_TYPES = ['text', 'number', 'url', 'date', 'choice', 'checkbox', 'person'] as const
 export type FieldType = (typeof FIELD_TYPES)[number]
 
@@ -104,6 +111,26 @@ export type BoardOp =
   | { k: 'category.set'; id: string; name: string; pos: string; archived: boolean }
   /** workspaces: put a company board in a category (null: back to the main list) */
   | { k: 'board.place'; board: string; category: string | null }
+  /**
+   * a file on a card (see blobcrypto.ts): `hashes` and `key` are b64url, the
+   * bytes travel separately; `thumb` is a small preview image, `w`/`h` the
+   * size of the picture or video
+   */
+  | {
+      k: 'attach.add'
+      id: string
+      card: string
+      name: string
+      mime: string
+      size: number
+      ps: number
+      hashes: string
+      key: string
+      thumb: string | null
+      w: number | null
+      h: number | null
+    }
+  | { k: 'attach.remove'; id: string; card: string }
 
 export type BoardOpKind = BoardOp['k']
 
@@ -141,6 +168,32 @@ const isOptions = (x: unknown): boolean =>
   new Set(x.map((o: FieldOption) => o.id)).size === x.length
 const isFieldValue = (v: unknown): boolean =>
   v === null || isBool(v) || (typeof v === 'number' && Number.isFinite(v)) || isStr(v, MAX_URL)
+
+const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i
+export const isMimeType = (s: unknown): s is string => isStr(s, MAX_MIME, 1) && MIME.test(s)
+const isDim = (x: unknown): boolean => x === null || (Number.isSafeInteger(x) && (x as number) >= 1 && (x as number) <= MAX_DIM)
+const isPieceSize = (x: unknown): x is number =>
+  Number.isSafeInteger(x) && (x as number) >= MIN_PIECE && (x as number) <= MAX_PIECE && ((x as number) & ((x as number) - 1)) === 0
+
+function isAttachAdd(o: Record<string, unknown>): boolean {
+  if (!isPieceSize(o.ps) || !Number.isSafeInteger(o.size)) return false
+  const size = o.size as number
+  if (size < 0 || size > o.ps * MAX_PIECES) return false
+  const hashLen = b64Len(pieceCount(size, o.ps) * HASH_BYTES)
+  return (
+    isId(o.id) &&
+    isId(o.card) &&
+    isStr(o.name, MAX_FILE_NAME, 1) &&
+    (o.mime === '' || isMimeType(o.mime)) &&
+    typeof o.hashes === 'string' &&
+    o.hashes.length === hashLen &&
+    isCanonicalB64url(o.hashes) &&
+    isPub(o.key) &&
+    (o.thumb === null || (typeof o.thumb === 'string' && o.thumb.length <= b64Len(MAX_THUMB) && isCanonicalB64url(o.thumb))) &&
+    isDim(o.w) &&
+    isDim(o.h)
+  )
+}
 
 /**
  * An http(s) link with a host, and no whitespace, control characters or
@@ -328,6 +381,13 @@ export function opSchemaError(x: unknown): string | null {
       return allowedKeys(o, ['k', 'board', 'category']) && isPub(o.board) && (o.category === null || isId(o.category))
         ? null
         : 'bad board.place'
+    case 'attach.add':
+      return allowedKeys(o, ['k', 'id', 'card', 'name', 'mime', 'size', 'ps', 'hashes', 'key', 'thumb', 'w', 'h']) &&
+        isAttachAdd(o)
+        ? null
+        : 'bad attach.add'
+    case 'attach.remove':
+      return allowedKeys(o, ['k', 'id', 'card']) && isId(o.id) && isId(o.card) ? null : 'bad attach.remove'
     default:
       return 'unknown op'
   }
@@ -380,6 +440,27 @@ export interface Comment {
   imported: { author: string; name: string; ts: number } | null
 }
 
+/** a file on a card; its bytes are fetched apart from the log (see blobs.ts) */
+export interface Attachment {
+  id: string
+  card: string
+  name: string
+  mime: string
+  size: number
+  ps: number
+  /** pieces */
+  n: number
+  hashes: string
+  key: string
+  /** content address of the sealed pieces: what peers fetch it by */
+  root: string
+  thumb: string | null
+  w: number | null
+  h: number | null
+  by: string
+  ts: number
+}
+
 export interface Card {
   id: string
   title: string
@@ -397,6 +478,8 @@ export interface Card {
   createdAt: number
   updatedAt: number
   comments: Comment[]
+  /** files not removed, oldest first */
+  attachments: Attachment[]
   /** values of live fields, in the order they were added */
   fields: FieldEntry[]
   /** someone edited the card in a way the mover did not see; that edit is not in the copy */
@@ -453,6 +536,8 @@ export interface BoardView {
   categories: Map<string, Category>
   /** workspaces: board id → category id as last placed (the category may since be archived) */
   placements: Map<string, string | null>
+  /** root → a live attachment with it, on any card here: the files this board's members may fetch */
+  blobs: Map<string, Attachment>
   members: Member[]
   profiles: Map<string, string>
   myRole: RoleOrNone
@@ -665,6 +750,7 @@ export function computeBoard(
   const categories = new Map<string, Category>()
   const placements = new Map<string, string | null>()
   const entries = new Map<string, { id: string; card: string; field: string; value: FieldValue; removed: boolean }>()
+  const attachments = new Map<string, Attachment & { removed: boolean }>()
 
   const cardStub = (id: string, a: Applied) => {
     let c = cards.get(id)
@@ -685,6 +771,7 @@ export function computeBoard(
         createdAt: a.m.ts,
         updatedAt: a.m.ts,
         comments: [],
+        attachments: [],
         fields: [],
         editedAfterMove: false,
         version: '',
@@ -802,6 +889,22 @@ export function computeBoard(
       case 'board.place':
         placements.set(op.board, op.category)
         break
+      case 'attach.add': {
+        // first write wins, like comments: an attachment never changes
+        if (attachments.has(op.id)) break
+        const { k: _k, ...at } = op
+        const n = pieceCount(op.size, op.ps)
+        attachments.set(op.id, { ...at, n, root: rootOf(fromB64url(op.hashes)), by: a.m.author, ts: a.m.ts, removed: false })
+        cardStub(op.card, a).edits.push(a.m.id)
+        break
+      }
+      case 'attach.remove': {
+        const at = attachments.get(op.id)
+        if (!at || at.card !== op.card || at.removed) break
+        at.removed = true
+        cardStub(op.card, a).edits.push(a.m.id)
+        break
+      }
     }
   }
 
@@ -819,6 +922,10 @@ export function computeBoard(
     c.edits.push(cm.id)
   }
 
+  for (const { removed, ...at } of attachments.values()) {
+    if (!removed) cards.get(at.card)?.attachments.push(at)
+  }
+
   const liveColumns = [...columns.values()].filter((c) => !c.archived).sort(posCmp)
   const archivedColumns = [...columns.values()].filter((c) => c.archived).sort(posCmp)
   const liveColIds = new Set(liveColumns.map((c) => c.id))
@@ -827,12 +934,15 @@ export function computeBoard(
   const archivedCards: Card[] = []
   const movedOut: Card[] = []
   const outCards = new Map<string, Card>()
+  const files = new Map<string, Attachment>()
   for (const c of cards.values()) {
     if (!c.created) continue
     const { created: _c, movedVer, edits, ...card } = c
     card.version = editVersion(edits)
     card.editedAfterMove = card.movedTo !== null && card.version !== movedVer
     card.comments.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1))
+    card.attachments.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1))
+    for (const at of card.attachments) if (!files.has(at.root)) files.set(at.root, at)
     outCards.set(card.id, card)
     if (card.movedTo !== null) movedOut.push(card)
     else if (card.archived) archivedCards.push(card)
@@ -869,6 +979,7 @@ export function computeBoard(
     fields,
     categories,
     placements,
+    blobs: files,
     members,
     profiles,
     myRole: res.roles.get(me.pub) ?? 'none',

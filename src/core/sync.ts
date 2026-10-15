@@ -6,6 +6,7 @@ import { boardIdFor } from './acl'
 import { chainKey, msgId, toWire, verifyEnvelope } from './envelope'
 import { getBoardHeads, getChainRange, getMessageAt, putFork, putOrphan, type LawhaDb } from './db'
 import { isB64, receiveEnvelope, schemaError, verifyForkProof } from './validate'
+import { bitBytes, type BlobMsg, type BlobStore } from './blobs'
 import type { AclContent, Envelope, ForkRecord, Identity, StoredMessage } from './types'
 
 /**
@@ -31,12 +32,28 @@ import type { AclContent, Envelope, ForkRecord, Identity, StoredMessage } from '
  * messages for an action a peer never registered, unread and forever.
  * `typing: 1` in it means they are writing a comment on that card; it is
  * said again as soon as that stops (installs from before it ignore it).
+ *
+ * Attachment bytes (blobs.ts) travel on live connections too, between
+ * members only, and only with peers whose `hi` says `blob: 1`. `bl` asks who
+ * holds which pieces of a file and asks for pieces; the pieces come back as
+ * raw bytes on the connection's own `piece` action (binary cannot ride in
+ * `mux`, which is JSON), with the board in the metadata. A piece is served
+ * only to a member of a board one of whose live attachments it belongs to.
  */
 
-export type SyncAction = 'auth' | 'status' | 'have' | 'want' | 'msgs' | 'forks' | 'look' | 'offer' | 'mux'
-export const SYNC_ACTIONS: SyncAction[] = ['auth', 'status', 'have', 'want', 'msgs', 'forks', 'look', 'offer', 'mux']
+export type SyncAction = 'auth' | 'status' | 'have' | 'want' | 'msgs' | 'forks' | 'look' | 'offer' | 'mux' | 'bl'
+export const SYNC_ACTIONS: SyncAction[] = ['auth', 'status', 'have', 'want', 'msgs', 'forks', 'look', 'offer', 'mux', 'bl']
 /** what a board session sends; `offer` and `mux` belong to the connection itself */
-const SESSION_ACTIONS = new Set<string>(['auth', 'status', 'have', 'want', 'msgs', 'forks', 'look'])
+const SESSION_ACTIONS = new Set<string>(['auth', 'status', 'have', 'want', 'msgs', 'forks', 'look', 'bl'])
+/** the binary action attachment pieces travel on, apart from SYNC_ACTIONS (JSON) */
+export const PIECE_ACTION = 'piece'
+
+/** what comes with a piece: its board (the session it answers), file and index */
+export interface PieceMeta {
+  b: string
+  r: string
+  i: number
+}
 
 /** how often an open card is announced again, and how long a peer's lasts without that */
 export const LOOK_EVERY_MS = 20_000
@@ -47,6 +64,8 @@ export interface PeerChannel {
   key: string
   board: string
   send(action: SyncAction, payload: unknown): void
+  /** raw bytes on PIECE_ACTION; resolves once handed to the connection */
+  sendBin?(data: Uint8Array, meta: PieceMeta): Promise<void>
   /** DTLS fingerprints of this connection (local = ours), or null if unavailable */
   fingerprints(): { local: string; remote: string } | null
 }
@@ -74,6 +93,14 @@ export interface SyncHost {
   /** which cards of this board other people have open may have changed (see lookers()) */
   onLooks?(board: string): void
   onBadPeer?(key: string): void
+  /** attachments: the live one of this board with this root (what may be served), else null */
+  blobOf?(board: string, root: string): { n: number } | null
+  blobStore?(): BlobStore
+  onBlobHave?(key: string, board: string, root: string, bits: string): void
+  onBlobPiece?(key: string, board: string, root: string, i: number, data: Uint8Array): Promise<'ok' | 'bad' | 'stale'>
+  /** a session of this board we can fetch files from came up */
+  onBlobSources?(board: string): void
+  onBlobPeerGone?(key: string): void
   now?(): number
 }
 
@@ -82,6 +109,9 @@ const MAX_RANGE = 1000
 const MAX_CHAINS = 2000
 const MAX_BAD = 10
 const MAX_OFFER = 500
+/** pieces one peer may have waiting on us, and asked for in one `get` */
+const MAX_UPLOAD_QUEUE = 8
+const MAX_GET = 4
 const AUTH_CTX = 'lawha-auth-v1'
 
 interface PeerState {
@@ -104,6 +134,8 @@ interface PeerState {
   bad: number
   /** their `hi` said they take `look` messages */
   looks: boolean
+  /** their `hi` said they take `bl` and `piece` */
+  blobs: boolean
   /** the card they have open on this board, and when they last said so */
   look: { card: string; at: number; typing: boolean } | null
 }
@@ -135,6 +167,8 @@ export class SyncManager {
   private declined = new Map<string, Set<string>>()
   /** the card we have open, announced to its board's members */
   private myLook: { board: string; card: string; typing?: boolean } | null = null
+  /** session → pieces it asked us for, sent one at a time */
+  private uploads = new Map<string, { queue: Array<{ r: string; i: number }>; busy: boolean }>()
 
   constructor(private host: SyncHost, session?: string) {
     this.session = session ?? toB64url(randomBytes(16))
@@ -165,9 +199,10 @@ export class SyncManager {
       statusSent: false,
       bad: 0,
       looks: false,
+      blobs: false,
       look: null,
     })
-    ch.send('auth', { step: 'hi', nonce, session: this.session, look: 1 })
+    ch.send('auth', { step: 'hi', nonce, session: this.session, look: 1, blob: 1 })
   }
 
   onPeerLeave(key: string): void {
@@ -175,6 +210,8 @@ export class SyncManager {
     if (!gone) return
     this.peers.delete(key)
     this.declined.delete(key)
+    this.uploads.delete(key)
+    this.host.onBlobPeerGone?.(key)
     const lapsed = new Set<string>()
     if (gone.look) lapsed.add(gone.ch.board)
     // the sessions it carried end with it
@@ -182,6 +219,8 @@ export class SyncManager {
       if (p.via !== key) continue
       if (p.look) lapsed.add(p.ch.board)
       this.peers.delete(k)
+      this.uploads.delete(k)
+      this.host.onBlobPeerGone?.(k)
     }
     for (const b of lapsed) this.host.onLooks?.(b)
     const who = gone.via ? null : installOf(gone)
@@ -224,6 +263,7 @@ export class SyncManager {
         peer.servesUs = payload.member === 1
         // they drop our `look` until they count us as a member: say it again
         if (peer.servesUs && !was && this.myLook?.board === peer.ch.board) this.sendLook(peer.ch.board, peer)
+        if (peer.servesUs && !was && peer.blobs) this.host.onBlobSources?.(peer.ch.board)
         return
       }
       case 'have':
@@ -236,6 +276,8 @@ export class SyncManager {
         return this.handleForks(peer, payload)
       case 'look':
         return this.handleLook(peer, payload)
+      case 'bl':
+        return this.handleBl(peer, payload)
     }
   }
 
@@ -248,9 +290,10 @@ export class SyncManager {
       peer.theirNonce = p.nonce
       peer.theirSession = p.session.slice(0, 64)
       peer.looks = p.look === 1
+      peer.blobs = p.blob === 1
       // ours may have reached them before they had the session (one they
       // took up later, or a join they had not seen yet): say it once more
-      if (p.re !== 1) peer.ch.send('auth', { step: 'hi', nonce: peer.nonce, session: this.session, look: 1, re: 1 })
+      if (p.re !== 1) peer.ch.send('auth', { step: 'hi', nonce: peer.nonce, session: this.session, look: 1, blob: 1, re: 1 })
       if (!peer.proofSent) this.sendProof(peer)
       return
     }
@@ -327,6 +370,7 @@ export class SyncManager {
         key,
         board,
         send: (action, payload) => base.ch.send('mux', { b: board, a: action, p: payload }),
+        sendBin: (data, meta) => base.ch.sendBin?.(data, { ...meta, b: board }) ?? Promise.resolve(),
         fingerprints: () => base.ch.fingerprints(),
       },
       base.ch.key,
@@ -459,6 +503,88 @@ export class SyncManager {
       byCard.set(p.look.card, set)
     }
     return Object.fromEntries([...byCard].map(([card, pubs]) => [card, [...pubs].sort()]))
+  }
+
+  // ---- attachments ----
+
+  /** Sessions of `board` to fetch files from: they serve us and take `bl`; one per install, direct ones first. */
+  blobSources(board: string): string[] {
+    const byInstall = new Map<string, PeerState>()
+    for (const p of this.peers.values()) {
+      if (p.ch.board !== board || !p.authed || !p.servesUs || !p.blobs) continue
+      const who = installOf(p)!
+      const had = byInstall.get(who)
+      if (!had || (had.via && !p.via)) byInstall.set(who, p)
+    }
+    return [...byInstall.values()].map((p) => p.ch.key)
+  }
+
+  sendBl(key: string, msg: BlobMsg): void {
+    const peer = this.peers.get(key)
+    if (peer?.authed && peer.blobs) peer.ch.send('bl', msg)
+  }
+
+  private async handleBl(peer: PeerState, p: unknown): Promise<void> {
+    if (!peer.blobs || !isObj(p) || !isB64(p.r, B64_32)) return
+    const board = peer.ch.board
+    const root = p.r
+    if (p.step === 'h') {
+      if (typeof p.bits === 'string' && p.bits.length <= 200) this.host.onBlobHave?.(peer.ch.key, board, root, p.bits)
+      return
+    }
+    // what follows serves: current members only, and only this board's live files
+    if (!peer.served) return
+    const at = this.host.blobOf?.(board, root)
+    const store = this.host.blobStore?.()
+    if (!at || !store) return
+    if (p.step === 'q') {
+      const rec = await store.record(root)
+      if (rec && rec.n === at.n && rec.count > 0) peer.ch.send('bl', { step: 'h', r: root, bits: toB64url(rec.got.subarray(0, bitBytes(rec.n))) })
+      return
+    }
+    if (p.step === 'get' && Array.isArray(p.i)) {
+      const up = this.uploads.get(peer.ch.key) ?? { queue: [], busy: false }
+      this.uploads.set(peer.ch.key, up)
+      for (const i of p.i.slice(0, MAX_GET)) {
+        if (!Number.isSafeInteger(i) || i < 0 || i >= at.n || up.queue.length >= MAX_UPLOAD_QUEUE) continue
+        up.queue.push({ r: root, i })
+      }
+      await this.pumpUploads(peer)
+    }
+  }
+
+  /** Send what a session asked for, one piece at a time: the connection's own pace. */
+  private async pumpUploads(peer: PeerState): Promise<void> {
+    const up = this.uploads.get(peer.ch.key)
+    const store = this.host.blobStore?.()
+    if (!up || up.busy || !store) return
+    up.busy = true
+    try {
+      for (let next = up.queue.shift(); next; next = up.queue.shift()) {
+        if (this.peers.get(peer.ch.key) !== peer || !peer.served) break
+        const data = await store.getPiece(next.r, next.i)
+        if (data) await peer.ch.sendBin?.(data, { b: peer.ch.board, r: next.r, i: next.i })
+      }
+    } finally {
+      up.busy = false
+    }
+  }
+
+  /** A piece arrived on direct connection `ch`, for the session of the board its metadata names. */
+  async onPiece(ch: PeerChannel, data: unknown, meta: unknown): Promise<void> {
+    const base = this.peers.get(ch.key)
+    if (!base || base.via || !base.authed || !(data instanceof Uint8Array) || !isObj(meta)) return
+    const { b, r, i } = meta
+    if (!isB64(b, B64_32) || !isB64(r, B64_32) || !Number.isSafeInteger(i)) return
+    const peer = b === ch.board ? base : this.peers.get(carriedKey(ch.key, b))
+    if (!peer?.authed || !peer.blobs) return
+    let result: 'ok' | 'bad' | 'stale' | undefined
+    try {
+      result = await this.host.onBlobPiece?.(peer.ch.key, peer.ch.board, r, i as number, data)
+    } catch {
+      return // could not store it (out of space): it is asked for again later
+    }
+    if (result === 'bad' && ++peer.bad >= MAX_BAD) this.dropBad(peer)
   }
 
   // ---- anti-entropy ----

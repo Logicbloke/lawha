@@ -197,6 +197,21 @@ export interface BoardRecord {
   hidden: number
 }
 
+/** The sealed pieces of one attachment this device holds (see core/blobs.ts). */
+export interface BlobRecord {
+  root: string
+  /** pieces in the file */
+  n: number
+  /** bit i set: piece i is stored */
+  got: Uint8Array
+  count: number
+  /** sealed bytes stored */
+  bytes: number
+  /** our own upload: never evicted for space */
+  pinned: number
+  usedAt: number
+}
+
 export interface ContactRecord {
   pub: string
   name: string

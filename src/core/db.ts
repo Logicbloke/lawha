@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type {
+  BlobRecord,
   BoardRecord,
   ContactRecord,
   DeviceRecord,
@@ -38,6 +39,10 @@ export interface LawhaSchema extends DBSchema {
   device: { key: string; value: DeviceRecord }
   boards: { key: string; value: BoardRecord }
   contacts: { key: string; value: ContactRecord }
+  /** attachments held here: which pieces, by root */
+  blobs: { key: string; value: BlobRecord }
+  /** sealed attachment pieces, keyed [root, index]; never loaded with the boards */
+  pieces: { key: [string, number]; value: Uint8Array }
 }
 
 export type LawhaDb = IDBPDatabase<LawhaSchema>
@@ -52,7 +57,7 @@ export const ORPHAN_CAP = 2000
  * drop it and reopen. See `withDb` in state/store.ts.
  */
 export function openLawhaDb(name = 'lawha', onTerminated?: () => void): Promise<LawhaDb> {
-  return openDB<LawhaSchema>(name, 1, {
+  return openDB<LawhaSchema>(name, 2, {
     terminated: onTerminated,
     upgrade(db, oldVersion) {
       if (oldVersion < 1) {
@@ -80,6 +85,10 @@ export function openLawhaDb(name = 'lawha', onTerminated?: () => void): Promise<
         db.createObjectStore('device', { keyPath: 'id' })
         db.createObjectStore('boards', { keyPath: 'id' })
         db.createObjectStore('contacts', { keyPath: 'pub' })
+      }
+      if (oldVersion < 2) {
+        db.createObjectStore('blobs', { keyPath: 'root' })
+        db.createObjectStore('pieces')
       }
     },
   })

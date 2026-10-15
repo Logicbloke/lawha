@@ -19,6 +19,7 @@ import {
 } from '../core/identity'
 import { clearSession, createSession, getSessionExpiry, loadSession } from '../core/session'
 import { Engine } from '../core/engine'
+import { eagerLimitFor } from './filePrefs'
 import type { RelayHealth } from '../core/net'
 import type { Identity } from '../core/types'
 
@@ -261,6 +262,8 @@ export function setOnReady(fn: (engine: Engine) => void): void {
 
 async function ready(identity: Identity): Promise<void> {
   engine = new Engine(getDb, identity, dev)
+  // before the boards load: their first fold already fetches files by this
+  engine.eagerLimit = eagerLimitFor
   // deferred: engine.view() may refold (and emit) while a component renders,
   // and React forbids updating the store mid-render; also coalesces bursts
   let bumpQueued = false

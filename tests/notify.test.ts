@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Peer, syncAll } from './sim'
-import { createBoardItems, moveCardsItems, newEntityId, setRoleItem } from '../src/core/actions'
+import { attachOp, createBoardItems, moveCardsItems, newEntityId, opItem, setRoleItem } from '../src/core/actions'
+import { PIECE_SIZE, sealFile } from '../src/core/blobcrypto'
 import { positionsAt, type BoardView } from '../src/core/board'
 import { mentionToken, mentionedPubs, plainMentions, splitMentions } from '../src/core/mentions'
 import { notesFor, type NotifyPrefs } from '../src/state/notify'
@@ -80,6 +81,17 @@ describe('notifications', () => {
     ])
     const mine = addCard(e, b, 'Mine', 'Todo')
     expect(told(prefs, () => o.op(b, { k: 'card.update', id: mine, desc: 'x' }))).toEqual(['Olga edited “Mine”'])
+  })
+
+  it('a file added to a card I am involved in, by its name', async () => {
+    const { o, e, b, told } = setup()
+    const a = card(o.view(b), 'A')
+    e.op(b, { k: 'comment.add', id: newEntityId(), card: a, text: 'on it', imported: null })
+    syncAll(o, e)
+    const sealed = await sealFile(new Uint8Array(10))
+    const op = () => attachOp(a, { name: 'spec.pdf', mime: 'application/pdf', size: 10, ps: PIECE_SIZE, sealed, thumb: null, w: null, h: null })
+    expect(told({ ...NONE, involved: true }, () => o.write([opItem(o.view(b), op())]))).toEqual(['Olga attached spec.pdf to “A”'])
+    expect(told(NONE, () => o.write([opItem(o.view(b), op())]))).toEqual([])
   })
 
   it('mentions, shown by name, even on cards I have nothing to do with', () => {

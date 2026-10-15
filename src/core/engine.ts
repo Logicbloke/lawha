@@ -6,6 +6,7 @@ import { boardIdFor } from './acl'
 import { rotateItem } from './actions'
 import { computeBoard, netSecret, type AppliedOp, type BoardView, type DecryptCache } from './board'
 import { localKey, openLocal, sealLocal } from './boardcrypto'
+import { BlobStore, Swarm } from './blobs'
 import {
   deleteOrphan,
   getBoardForks,
@@ -73,6 +74,9 @@ interface BoardState {
   dirty: boolean
 }
 
+/** files up to this size are fetched as soon as they appear on a board (see eagerLimit) */
+export const DEFAULT_EAGER_BYTES = 10 * 1024 * 1024
+
 export interface EngineOptions {
   /** debounce for re-folding after ingest; 0 = synchronous (tests) */
   debounceMs?: number
@@ -84,6 +88,14 @@ export interface EngineOptions {
 export class Engine {
   readonly events = new Emitter<EngineEvents>()
   readonly sync: SyncManager
+  readonly blobs: BlobStore
+  readonly swarm: Swarm
+  /**
+   * Attachments of a board up to this many bytes are fetched as soon as they
+   * appear, so they stay available when whoever added them is offline;
+   * bigger ones when opened. A local choice (state/attachments.ts sets it).
+   */
+  eagerLimit: (board: string) => number = () => DEFAULT_EAGER_BYTES
   private boards = new Map<string, BoardState>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private healTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -127,9 +139,25 @@ export class Engine {
       onPeerAuthed: (board, pub, member) => this.events.emit('peer-authed', { board, pub, member }),
       onPresence: () => this.events.emit('presence', {}),
       onLooks: (board) => this.events.emit('looks', { board }),
+      blobOf: (board, root) => this.view(board)?.blobs.get(root) ?? null,
+      blobStore: () => this.blobs,
+      onBlobHave: (key, board, root, bits) => this.swarm.onHave(key, board, root, bits),
+      onBlobPiece: (key, board, root, i, data) => this.swarm.onPiece(key, board, root, i, data),
+      onBlobSources: (board) => this.swarm.onSources(board),
+      onBlobPeerGone: (key) => this.swarm.onPeerGone(key),
       now: () => this.opts.now(),
     }
     this.sync = new SyncManager(host)
+    this.blobs = new BlobStore(getDb, () => this.opts.now())
+    this.swarm = new Swarm(
+      {
+        sources: (board) => this.sync.blobSources(board),
+        send: (key, msg) => this.sync.sendBl(key, msg),
+        live: (board, root) => this.view(board)?.blobs.has(root) ?? false,
+        now: () => this.opts.now(),
+      },
+      this.blobs,
+    )
     // what we hold or who is on it changed: shared connections may carry more
     this.events.on('acl-changed', () => this.scheduleReoffer())
     this.events.on('boards-changed', () => this.scheduleReoffer())
@@ -384,6 +412,7 @@ export class Engine {
     }
     this.bg(this.cacheName(st))
     this.maybeHeal(st)
+    this.replicate(st)
     this.events.emit('board-changed', { board })
     if (before) this.reportActivity(st, before, view)
   }
@@ -425,6 +454,31 @@ export class Engine {
       accepted.push(...r.accepted)
     }
     if (accepted.length > 0) await this.ingested(board, accepted)
+  }
+
+  // ---- attachments ----
+
+  /** Fetch this board's files up to the eager limit (see eagerLimit). */
+  private replicate(st: BoardState): void {
+    const view = st.view
+    if (!view || view.myRole === 'none' || st.record.hidden) return
+    const limit = this.eagerLimit(view.id)
+    for (const at of view.blobs.values()) {
+      if (at.size <= limit) void this.swarm.want(view.id, at)
+    }
+  }
+
+  /** Fetch what now fits this board's eager limit (it was raised). */
+  refetch(board: string): void {
+    const st = this.boards.get(board)
+    if (st?.view) this.replicate(st)
+  }
+
+  /** Every root a followed board still has a live attachment for. */
+  liveRoots(): Set<string> {
+    const live = new Set<string>()
+    for (const id of this.boards.keys()) for (const root of this.view(id)?.blobs.keys() ?? []) live.add(root)
+    return live
   }
 
   // ---- key healing ----
@@ -474,7 +528,10 @@ export class Engine {
 
   /** Resolves once no background work is pending (tests, shutdown). */
   async idle(): Promise<void> {
-    while (this.tasks.size > 0) await Promise.allSettled([...this.tasks])
+    do {
+      while (this.tasks.size > 0) await Promise.allSettled([...this.tasks])
+      await this.swarm.idle()
+    } while (this.tasks.size > 0)
   }
 
   stop(): void {

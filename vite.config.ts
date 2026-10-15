@@ -40,7 +40,10 @@ const CSP = [
   // api.github.com: best-effort release-version check (UpdateBanner). Fails
   // silently if blocked; the app never depends on it.
   "connect-src 'self' ws: wss: https://api.github.com",
-  "img-src 'self' data:",
+  // blob:: attachments decrypted in the page (a picture or video only, never
+  // a document: see core/sniff.ts); data:: their small previews
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",

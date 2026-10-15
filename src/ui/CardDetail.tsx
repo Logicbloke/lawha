@@ -6,6 +6,7 @@ import { updateCard } from '../state/actions'
 import { setOpenCard, useViewers, useWriters } from '../state/looking'
 import { formatRelative, shortKey, useNow } from './hooks'
 import { byName, CardFields } from './CardFields'
+import { Attachments, useAttachTarget } from './Attachments'
 import { CommentBox, CommentText } from './Comments'
 import { Identicon } from './Identicon'
 import { useT } from './i18n'
@@ -86,10 +87,11 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
   const nameOf = (pub: string) => view.profiles.get(pub) || shortKey(pub)
   const toggleIn = (list: string[], x: string) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x])
   const movedToName = card.movedTo ? getEngine().boardName(card.movedTo) : ''
+  const drop = useAttachTarget(view.id, card.id, canEdit)
 
   return (
     <Modal label={card.title} onClose={onClose} wide>
-      <div className="detail">
+      <div className={`detail ${drop.over ? 'dropping' : ''}`} {...drop.props} data-drop-label={t('attachDrop')}>
         <div className="detail-main">
           {canEdit ? (
             <textarea
@@ -149,6 +151,8 @@ export function CardDetail({ view, cardId, onClose, onMove }: Props) {
           )}
 
           <CardFields view={view} card={card} canEdit={canEdit} />
+
+          <Attachments view={view} card={card} canEdit={canEdit} />
 
           <h3>{t('comments')}</h3>
           <ul className="comments-list">

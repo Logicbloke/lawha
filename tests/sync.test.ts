@@ -1,13 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { randomBytes } from '@noble/hashes/utils.js'
 import { uniqueDbName } from './sim'
-import { toB64url } from '../src/core/b64'
+import { fromB64url, toB64url } from '../src/core/b64'
 import { openLawhaDb, type LawhaDb } from '../src/core/db'
 import { Engine } from '../src/core/engine'
 import { generateIdentity } from '../src/core/identity'
-import { createBoardItems, newEntityId, opItem, removeItem, setRoleItem } from '../src/core/actions'
+import { attachOp, createBoardItems, newEntityId, opItem, removeItem, setRoleItem } from '../src/core/actions'
+import { PIECE_SIZE, openPiece, sealFile } from '../src/core/blobcrypto'
+import type { Attachment } from '../src/core/board'
 import { toWire } from '../src/core/envelope'
-import { LOOK_TTL_MS, type PeerChannel, type SyncAction } from '../src/core/sync'
+import { LOOK_TTL_MS, type PeerChannel, type PieceMeta, type SyncAction } from '../src/core/sync'
 import type { Role } from '../src/core/types'
 
 /** In-memory transport: async delivery, explicit links, settle() to quiesce. */
@@ -28,6 +30,13 @@ class MockNet {
         const t = to()
         const p = Promise.resolve().then(() => t.e.sync.onMessage(t.ch, action, copy))
         this.track(p)
+      },
+      sendBin: async (data: Uint8Array, meta: PieceMeta) => {
+        if (!up) return
+        const copy = data.slice()
+        const m = JSON.parse(JSON.stringify(meta)) as unknown
+        const t = to()
+        this.track(Promise.resolve().then(() => t.e.sync.onPiece(t.ch, copy, m)))
       },
     })
     const a: PeerChannel = mk(ea, () => ({ e: eb, ch: b }), fps?.a ?? '', fps?.b ?? '')
@@ -399,7 +408,8 @@ describe('company workspaces', () => {
 
 /**
  * A link that records what each side is sent (`mux` as `mux:<action>`), and
- * can make `b` an install from before `look`: its `hi` lacks the flag.
+ * can make `b` an install from before `look` and attachments: its `hi` lacks
+ * those flags.
  */
 function tapLink(net: MockNet, ea: Engine, eb: Engine, board: string, bIsOld = false): { toA: string[]; toB: string[] } {
   const seen = { toA: [] as string[], toB: [] as string[] }
@@ -414,6 +424,10 @@ function tapLink(net: MockNet, ea: Engine, eb: Engine, board: string, bIsOld = f
       const copy = JSON.parse(JSON.stringify(payload)) as unknown
       net.track(Promise.resolve().then(() => eb.sync.onMessage(b, action, copy)))
     },
+    sendBin: async (data, meta) => {
+      seen.toB.push('piece')
+      net.track(Promise.resolve().then(() => eb.sync.onPiece(b, data.slice(), { ...meta })))
+    },
   }
   const b: PeerChannel = {
     key: `${board}:tap:b`,
@@ -423,8 +437,15 @@ function tapLink(net: MockNet, ea: Engine, eb: Engine, board: string, bIsOld = f
       seen.toA.push(name(action, payload))
       const copy = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>
       const auth = action === 'auth' ? copy : action === 'mux' && copy.a === 'auth' ? (copy.p as Record<string, unknown>) : null
-      if (bIsOld && auth?.step === 'hi') delete auth.look
+      if (bIsOld && auth?.step === 'hi') {
+        delete auth.look
+        delete auth.blob
+      }
       net.track(Promise.resolve().then(() => ea.sync.onMessage(a, action, copy)))
+    },
+    sendBin: async (data, meta) => {
+      seen.toA.push('piece')
+      net.track(Promise.resolve().then(() => ea.sync.onPiece(a, data.slice(), { ...meta })))
     },
   }
   ea.sync.onPeerJoin(a)
@@ -610,5 +631,180 @@ describe('activity', () => {
     await again.loadAll()
     expect(again.view(b)!.cards.size).toBe(3)
     expect(later).toEqual([])
+  })
+})
+
+describe('attachments', () => {
+  function bytes(n: number): Uint8Array {
+    const out = new Uint8Array(n)
+    for (let i = 0; i < n; i += 65536) out.set(randomBytes(Math.min(65536, n - i)), i)
+    return out
+  }
+
+  /** What the UI does: seal, keep the pieces, then write the op. */
+  async function upload(n: Node, board: string, card: string, data: Uint8Array): Promise<Attachment> {
+    const sealed = await sealFile(data)
+    await n.e.blobs.put(sealed.root, sealed.pieces.length, sealed.pieces.map((p, i) => [i, p] as [number, Uint8Array]), true)
+    n.e.swarm.markComplete(sealed.root)
+    const op = attachOp(card, { name: 'f.bin', mime: '', size: data.length, ps: PIECE_SIZE, sealed, thumb: null, w: null, h: null })
+    await n.e.write([opItem(n.e.view(board)!, op)])
+    return n.e.view(board)!.blobs.get(sealed.root)!
+  }
+
+  async function fileOf(n: Node, at: Attachment): Promise<Uint8Array | null> {
+    const pieces = await n.e.blobs.read(at.root)
+    if (!pieces) return null
+    const key = fromB64url(at.key)
+    return new Uint8Array(Buffer.concat(pieces.map((p, i) => openPiece(key, i, at.n, p)!)))
+  }
+
+  async function team(...roles: Array<Exclude<Role, 'owner'>>): Promise<{ o: Node; others: Node[]; b: string; card: string }> {
+    const o = await node()
+    const b = await makeBoard(o)
+    await addCard(o, b, 'c')
+    const others: Node[] = []
+    for (const role of roles) {
+      const x = await node()
+      await grant(o, b, x, role)
+      await x.e.follow(b, null)
+      others.push(x)
+    }
+    return { o, others, b, card: [...o.e.view(b)!.cards.keys()][0]! }
+  }
+
+  it('a member gets the file, and passes it on once its uploader is gone', async () => {
+    const { o, others: [x, y], b, card } = await team('editor', 'viewer')
+    const data = bytes(PIECE_SIZE * 2 + 99)
+    const at = await upload(o, b, card, data)
+    const net = new MockNet()
+    const ox = net.link(o.e, x.e, b)
+    await settleAll(net, o, x)
+    expect(await fileOf(x!, at)).toEqual(data) // fetched by itself: small enough
+    net.unlink(ox)
+    net.link(x!.e, y!.e, b)
+    await settleAll(net, x!, y!)
+    expect(await fileOf(y!, at)).toEqual(data)
+  })
+
+  it('pieces come from everyone who holds them', async () => {
+    const { o, others: [x, y], b, card } = await team('editor', 'editor')
+    const at = await upload(o, b, card, bytes(PIECE_SIZE * 4))
+    const net = new MockNet()
+    const ox = net.link(o.e, x!.e, b)
+    await settleAll(net, o, x!)
+    net.unlink(ox)
+    for (const n of [o, x!]) vi.spyOn(n.e.blobs, 'getPiece')
+    net.link(o.e, y!.e, b)
+    net.link(x!.e, y!.e, b)
+    await settleAll(net, o, x!, y!)
+    expect(await y!.e.blobs.complete(at.root)).toBe(true)
+    expect(vi.mocked(o.e.blobs.getPiece).mock.calls.length).toBeGreaterThan(0)
+    expect(vi.mocked(x!.e.blobs.getPiece).mock.calls.length).toBeGreaterThan(0)
+  })
+
+  it('files over the limit wait until someone opens them', async () => {
+    const { o, others: [x], b, card } = await team('editor')
+    x!.e.eagerLimit = () => PIECE_SIZE
+    const at = await upload(o, b, card, bytes(PIECE_SIZE * 3))
+    const net = new MockNet()
+    net.link(o.e, x!.e, b)
+    await settleAll(net, o, x!)
+    expect(x!.e.view(b)!.blobs.has(at.root)).toBe(true)
+    expect(await x!.e.blobs.record(at.root)).toBeNull()
+    const got = x!.e.swarm.want(b, at)
+    await settleAll(net, o, x!)
+    await got
+    expect(await x!.e.blobs.complete(at.root)).toBe(true)
+  })
+
+  it('a non-member, or a member of another board, gets no piece', async () => {
+    const { o, others: [x], b, card } = await team('editor')
+    const other = await makeBoard(o)
+    const y = await node()
+    await grant(o, other, x!, 'editor')
+    await x!.e.follow(other, null)
+    await y.e.follow(b, null)
+    x!.e.eagerLimit = () => 0
+    const at = await upload(o, b, card, bytes(1000))
+    vi.spyOn(o.e.blobs, 'getPiece')
+    const net = new MockNet()
+    net.link(o.e, y.e, b) // knows the board id, is not on it
+    net.link(o.e, x!.e, other)
+    await settleAll(net, o, x!, y)
+    // asking through a board the file is not on
+    void x!.e.swarm.want(other, at)
+    void y.e.swarm.want(b, at)
+    await settleAll(net, o, x!, y)
+    for (const n of [x!.e, y.e]) n.swarm.tick()
+    await settleAll(net, o, x!, y)
+    expect(vi.mocked(o.e.blobs.getPiece)).not.toHaveBeenCalled()
+    expect(await y.e.blobs.record(at.root)).toBeNull()
+    expect(await x!.e.blobs.record(at.root)).toBeNull()
+  })
+
+  it('a wrong piece is refused and fetched from someone else', async () => {
+    const { o, others: [x, y], b, card } = await team('editor', 'editor')
+    const data = bytes(5000)
+    const at = await upload(o, b, card, data)
+    const net = new MockNet()
+    const ox = net.link(o.e, x!.e, b)
+    await settleAll(net, o, x!)
+    net.unlink(ox)
+    // x's copy goes bad on disk
+    const bad = (await x!.db.get('pieces', [at.root, 0]))!.slice()
+    bad[0]! ^= 0xff
+    await x!.db.put('pieces', bad, [at.root, 0])
+    net.link(x!.e, y!.e, b)
+    await settleAll(net, x!, y!)
+    expect(await y!.e.blobs.record(at.root)).toBeNull()
+    net.link(o.e, y!.e, b)
+    await settleAll(net, o, x!, y!)
+    expect(await fileOf(y!, at)).toEqual(data)
+  })
+
+  it('a board carried over another board\'s connection brings its files too', async () => {
+    const o = await node()
+    const x = await node()
+    const [b1, b2] = [await makeBoard(o), await makeBoard(o)]
+    for (const b of [b1, b2]) {
+      await grant(o, b, x, 'editor')
+      await x.e.follow(b, null)
+    }
+    await addCard(o, b2, 'c')
+    const data = bytes(PIECE_SIZE + 1)
+    const at = await upload(o, b2, [...o.e.view(b2)!.cards.keys()][0]!, data)
+    const net = new MockNet()
+    net.link(o.e, x.e, b1)
+    await settleAll(net, o, x)
+    expect(await fileOf(x, at)).toEqual(data)
+  })
+
+  it('an install from before attachments is never sent `bl` or a piece', async () => {
+    const { o, others: [x], b, card } = await team('editor')
+    await upload(o, b, card, bytes(1000))
+    const net = new MockNet()
+    const seen = tapLink(net, o.e, x!.e, b, true)
+    await settleAll(net, o, x!)
+    expect(seen.toB.filter((a) => a.endsWith('bl') || a === 'piece')).toEqual([])
+  })
+
+  it('the store drops files no board names any more, then the oldest unpinned ones past its budget', async () => {
+    let t = 1_000_000
+    const n = await node(() => t)
+    const keep = async (root: string, size: number, pinned: boolean) => {
+      await n.e.blobs.put(root, 1, [[0, new Uint8Array(size)]], pinned)
+      t += 1000
+    }
+    const [dead, old, mine, fresh] = ['dead', 'old', 'mine', 'fresh'].map((s) => s.padEnd(43, 'A'))
+    await keep(dead!, 10, false)
+    await keep(old!, 100, false)
+    await keep(mine!, 100, true)
+    await keep(fresh!, 100, false)
+    const live = (r: string) => r !== dead
+    expect(await n.e.blobs.gc(live, 1000, 60_000)).toEqual([]) // not unused long enough
+    t += 60_000
+    expect((await n.e.blobs.gc(live, 250, 60_000)).sort()).toEqual([dead, old].sort())
+    expect(await n.e.blobs.complete(mine!)).toBe(true)
+    expect(await n.e.blobs.complete(fresh!)).toBe(true)
   })
 })

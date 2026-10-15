@@ -2028,6 +2028,192 @@ details.menu.add-entry > summary {
   }
 }
 
+/* ---- attachments ---- */
+
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.card-meta .attached {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.attach-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.attach-row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--slate);
+}
+.attach-thumb {
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--ink-2);
+  color: var(--muted);
+}
+.attach-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.attach-ext {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.attach-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+button.attach-name {
+  padding: 0;
+  text-align: start;
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  unicode-bidi: plaintext;
+}
+button.attach-name:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.attach-meta,
+.attach-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.attach-status {
+  color: var(--amber);
+}
+.attach-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.attach-actions button {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+}
+.attach-row.pending {
+  border-style: dashed;
+}
+.attach-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+}
+.attach-add .hint {
+  margin: 0;
+}
+@container (max-width: 30rem) {
+  .attach-row {
+    grid-template-columns: 3rem minmax(0, 1fr);
+  }
+  .attach-thumb {
+    width: 3rem;
+    height: 3rem;
+  }
+  .attach-actions {
+    grid-column: 2;
+  }
+}
+/* a file dragged over the card dialog */
+.detail.dropping {
+  position: relative;
+}
+.detail.dropping::after {
+  content: attr(data-drop-label);
+  position: absolute;
+  inset: -0.6rem;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--amber);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink-2) 85%, transparent);
+  color: var(--amber);
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 2;
+}
+.spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid var(--line);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(8 10 14 / 0.88);
+}
+.lightbox figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: 100%;
+  max-height: 100%;
+}
+.lightbox img,
+.lightbox video {
+  max-width: min(100%, 96vw);
+  max-height: calc(100dvh - 6rem);
+  object-fit: contain;
+  border-radius: 6px;
+}
+.lightbox figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.75rem;
+  color: #e8e4da;
+}
+.lightbox-name {
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-settings fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

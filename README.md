@@ -31,6 +31,9 @@ A Shabaka key backup works here too and keeps the same identity.
   device.
 - Columns you add, rename, reorder, archive, with work-in-progress limits.
 - Cards with descriptions, labels, assignees, due dates and comments.
+- **Attachments**: files up to 25 MB on a card (pick, drop or paste), with
+  previews for pictures and videos. They are end-to-end encrypted and
+  travel between members directly; no server ever holds them.
 - **Card fields**: admins define fields per board (text, number, link, date,
   choice list, checkbox, person); on a card you add only the ones you need,
   the same field as many times as you like.
@@ -105,6 +108,19 @@ serves every member's log, which is how changes reach someone whose author
 is offline. Peers who sign conflicting histories are caught with a fork proof
 that is gossiped to everyone.
 
+**Attachments.** A file is cut into 256 KiB pieces, each sealed under a
+random key of its own (XChaCha20-Poly1305). That key and the hash of every
+sealed piece go in the card's change, which is encrypted under the board key
+like any other, so only members can open the file, and the hashes pin its
+exact bytes. The pieces themselves never enter the log: each device keeps the
+ones it has in its own store and serves them to the board's other members
+over the same authenticated connections, checking every piece against its
+hash. Files up to a size you choose per board (10 MB unless you change it)
+are fetched as soon as they appear, so a file stays available while anyone
+who has it is online, not only whoever added it; bigger ones are fetched
+when opened. Only pictures and videos are shown in the app, typed by their
+actual bytes; every other file (SVG and HTML included) is only downloaded.
+
 Rooms are joined lazily: the open board, every company you are on, boards
 you wrote to recently, and one personal board you share with others, picked
 by rendezvous hashing so people who share boards land in the same room at
@@ -156,6 +172,13 @@ Lawha does **not** defend against:
   the remover had never seen are dropped, even if they predate the removal.
 - **Storage spam by members.** Any member can store changes that fail the
   rules; they are ignored but kept. Pruning is future work.
+- **Attachment availability.** A file nobody else has fetched yet cannot be
+  had while whoever added it is offline. Fetching small files right away
+  narrows that to "until one other member is online"; a device left running
+  helps. Files are only exchanged with members you are connected to, so they
+  reach about as far as the board's changes do.
+- **What a file says about you.** A photo's EXIF data (camera, sometimes GPS
+  position) stays in it. Removed members keep the files they had fetched.
 - **Endpoint compromise.** The key lives in the browser. Malware, a hostile
   extension or an XSS hole can take it. Mitigations: strict CSP, all user
   content rendered as text, passphrase encryption at rest.
@@ -173,6 +196,9 @@ src/core/       framework-agnostic protocol (no React)
   board.ts      the deterministic board fold + op schema + positions
   actions.ts    builders for every write (incl. group and cross-board moves)
   sync.ts       per-board gossip with channel-bound auth and a serving gate
+  blobcrypto.ts attachments: per-file keys, sealed pieces, piece hashes
+  blobs.ts      attachment pieces: the local store and the fetcher
+  sniff.ts      what a file really is (only pictures and videos are shown)
   net.ts        Trystero adapter: one room per board per strategy
   engine.ts     keeps boards folded, answers sync's questions, heals keys
   db.ts         IndexedDB schema

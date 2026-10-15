@@ -4,9 +4,12 @@ import { concatBytes, randomBytes } from '@noble/hashes/utils.js'
 import { fromB64url, toB64url } from './b64'
 import { boardIdFor, upToFor } from './acl'
 import { createEpoch, createGrant, sealOp, type KeyRing } from './boardcrypto'
+import type { SealedFile } from './blobcrypto'
 import {
+  MAX_FILE_NAME,
   MAX_MOVES,
   freshPositions,
+  isMimeType,
   needsRenormalize,
   positionsAt,
   type BoardOp,
@@ -96,6 +99,36 @@ export function createBoardItems(
 
 export function newEntityId(): string {
   return toB64url(randomBytes(16))
+}
+
+export interface NewAttachment {
+  name: string
+  mime: string
+  size: number
+  ps: number
+  sealed: SealedFile
+  /** a small preview picture, and the size of the picture or video */
+  thumb: Uint8Array | null
+  w: number | null
+  h: number | null
+}
+
+/** The op that puts a sealed file on a card; store its pieces first (BlobStore.put). */
+export function attachOp(card: string, file: NewAttachment): BoardOp {
+  return {
+    k: 'attach.add',
+    id: newEntityId(),
+    card,
+    name: [...file.name].slice(0, MAX_FILE_NAME).join('') || 'file',
+    mime: isMimeType(file.mime) ? file.mime : '',
+    size: file.size,
+    ps: file.ps,
+    hashes: toB64url(file.sealed.hashes),
+    key: toB64url(file.sealed.key),
+    thumb: file.thumb ? toB64url(file.thumb) : null,
+    w: file.w,
+    h: file.h,
+  }
 }
 
 /** Same source card moved to the same board twice → same target card. */
@@ -247,9 +280,9 @@ export interface CrossMove {
 /**
  * Move cards to another board: create them there (deterministic ids, so two
  * people moving the same card to the same board end up with one card), carry
- * labels by name, field values (see carryFields) and comments as imported
- * snapshots, then stub them out in
- * the source. One batch: all of it lands or none does.
+ * labels by name, field values (see carryFields), comments as imported
+ * snapshots and attachments, then stub them out in the source. One batch:
+ * all of it lands or none does.
  */
 export function moveCardsToBoardItems(
   src: BoardView,
@@ -311,6 +344,11 @@ export function moveCardsToBoardItems(
         text: cm.text,
         imported: cm.imported ?? { author: cm.author, name: src.profiles.get(cm.author) ?? '', ts: cm.ts },
       })
+    }
+    // the same key and pieces: nothing is re-encrypted, the op itself is sealed to the new board
+    for (const at of card.attachments) {
+      const { id, card: _card, n: _n, root: _root, by: _by, ts: _ts, ...rest } = at
+      commentOps.push({ k: 'attach.add', id: movedCardId(src.id, id, dst.id), card: newId, ...rest })
     }
   })
 

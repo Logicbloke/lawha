@@ -94,3 +94,20 @@ export async function copyText(text: string): Promise<boolean> {
     return false
   }
 }
+
+/** A file size in the user's language: 820 kB, 4.2 MB. */
+export function formatBytes(bytes: number, locale: string): string {
+  const units = ['byte', 'kilobyte', 'megabyte', 'gigabyte'] as const
+  let n = bytes
+  let i = 0
+  while (n >= 1000 && i < units.length - 1) {
+    n /= 1024
+    i++
+  }
+  return new Intl.NumberFormat(locale, {
+    style: 'unit',
+    unit: units[i],
+    unitDisplay: 'short',
+    maximumFractionDigits: n < 10 && i > 0 ? 1 : 0,
+  }).format(n)
+}

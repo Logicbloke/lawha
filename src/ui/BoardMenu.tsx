@@ -3,17 +3,20 @@ import type { BoardView } from '../core/board'
 import { RANK } from '../core/types'
 import { archiveColumn, leaveBoard, placeBoard, setMyName, updateCard } from '../state/actions'
 import { useGrouping } from '../state/categories'
-import { getEngine, me } from '../state/store'
+import { setEagerLimit } from '../state/attachments'
+import { EAGER_CHOICES, useEagerLimit } from '../state/filePrefs'
+import { getEngine, me, useApp } from '../state/store'
 import { Modal } from './CardDetail'
 import { FieldSettings } from './FieldSettings'
+import { formatBytes } from './hooks'
 import { useT } from './i18n'
 import { LabelSettings } from './LabelSettings'
 import { NotifySettings } from './NotifySettings'
 
-/** Board-level actions: rename, labels, fields, notifications, your display name here, archive, leave. */
+/** Board-level actions: rename, labels, fields, notifications, files kept here, your display name here, archive, leave. */
 export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): void }) {
   const t = useT()
-  const [panel, setPanel] = useState<'name' | 'labels' | 'fields' | 'notify' | 'category' | 'archive' | null>(null)
+  const [panel, setPanel] = useState<'name' | 'labels' | 'fields' | 'notify' | 'files' | 'category' | 'archive' | null>(null)
   const [name, setName] = useState(view.profiles.get(me().pub) ?? '')
   // the same grouping as the sidebar: the board's workspace, or this device for personal boards
   const ws = getEngine().wsOf(view.id)
@@ -51,6 +54,7 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
             </button>
           )}
           <button onClick={(e) => (close(e), setPanel('notify'))}>{t('notifications')}</button>
+          <button onClick={(e) => (close(e), setPanel('files'))}>{t('filesKeep')}</button>
           <button onClick={(e) => (close(e), setPanel('name'))}>{t('myNameHere')}</button>
           <button onClick={(e) => (close(e), setPanel('archive'))}>
             {t('archivedItems', { n: view.archivedCards.length + view.archivedColumns.length })}
@@ -102,6 +106,12 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
       {panel === 'notify' && (
         <Modal label={t('notifications')} onClose={() => setPanel(null)}>
           <NotifySettings view={view} onDone={() => setPanel(null)} />
+        </Modal>
+      )}
+
+      {panel === 'files' && (
+        <Modal label={t('filesKeep')} onClose={() => setPanel(null)}>
+          <FileSettings board={view.id} onDone={() => setPanel(null)} />
         </Modal>
       )}
 
@@ -157,5 +167,32 @@ export function BoardMenu({ view, onRename }: { view: BoardView; onRename(): voi
         </Modal>
       )}
     </>
+  )
+}
+
+/** How big a file of this board this device fetches by itself; kept here, never sent. */
+function FileSettings({ board, onDone }: { board: string; onDone(): void }) {
+  const t = useT()
+  const lang = useApp((s) => s.lang)
+  const limit = useEagerLimit(board)
+  const choices: number[] = EAGER_CHOICES.includes(limit as (typeof EAGER_CHOICES)[number]) ? [...EAGER_CHOICES] : [...EAGER_CHOICES, limit]
+  return (
+    <div className="stack file-settings">
+      <h2>{t('filesKeep')}</h2>
+      <p className="hint">{t('filesKeepHint')}</p>
+      <fieldset>
+        <legend className="sr-only">{t('filesKeep')}</legend>
+        {choices.map((n) => (
+          <label key={n} className="check-row">
+            <input type="radio" name="files-keep" checked={limit === n} onChange={() => setEagerLimit(board, n)} />
+            <span>{n === 0 ? t('filesKeepOff') : t('filesKeepUpTo', { size: formatBytes(n, lang) })}</span>
+          </label>
+        ))}
+      </fieldset>
+      <p className="hint">{t('filesLocal')}</p>
+      <div className="row">
+        <button onClick={onDone}>{t('done')}</button>
+      </div>
+    </div>
   )
 }

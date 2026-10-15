@@ -2,7 +2,7 @@ import { joinRoom as joinNostr, getRelaySockets as nostrSockets } from '@tryster
 import { joinRoom as joinMqtt, getRelaySockets as mqttSockets } from '@trystero-p2p/mqtt'
 import { joinRoom as joinTorrent, getRelaySockets as torrentSockets } from '@trystero-p2p/torrent'
 import { Emitter } from './events'
-import { SYNC_ACTIONS, type PeerChannel, type SyncAction } from './sync'
+import { PIECE_ACTION, SYNC_ACTIONS, type PeerChannel, type SyncAction } from './sync'
 import type { RoomSpec } from './engine'
 
 export const APP_ID = 'lawha-v1'
@@ -25,6 +25,8 @@ export interface NetHandlers {
   onPeer(ch: PeerChannel): void
   onPeerGone(key: string): void
   onMessage(ch: PeerChannel, action: SyncAction, payload: unknown): void
+  /** an attachment piece: raw bytes and their metadata */
+  onPiece?(ch: PeerChannel, data: unknown, meta: unknown): void
 }
 
 /** How many of a discovery network's relays we hold an open socket to. */
@@ -54,8 +56,8 @@ export interface NetOptions {
 }
 
 interface MessageAction {
-  send(data: unknown, options?: { target?: string }): Promise<void>
-  onMessage: ((data: unknown, context: { peerId: string }) => void) | null
+  send(data: unknown, options?: { target?: string; metadata?: unknown }): Promise<void>
+  onMessage: ((data: unknown, context: { peerId: string; metadata?: unknown }) => void) | null
 }
 
 export interface TrysteroRoom {
@@ -261,6 +263,11 @@ export class NetworkManager {
         if (ch) this.handlers.onMessage(ch, action, data)
       }
     }
+    const pieces = room.makeAction(PIECE_ACTION)
+    pieces.onMessage = (data, ctx) => {
+      const ch = this.channels.get(keyOf(ctx.peerId))
+      if (ch) this.handlers.onPiece?.(ch, data, ctx.metadata)
+    }
 
     room.onPeerJoin = (peerId) => {
       const key = keyOf(peerId)
@@ -269,6 +276,7 @@ export class NetworkManager {
         board: spec.board,
         send: (action, payload) =>
           void senders.get(action)!.send(payload, { target: peerId }).catch(() => undefined),
+        sendBin: (data, meta) => pieces.send(data, { target: peerId, metadata: meta }).catch(() => undefined),
         fingerprints: () => {
           try {
             const pc = room.getPeers()[peerId]

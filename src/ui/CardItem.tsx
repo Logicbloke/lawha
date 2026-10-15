@@ -40,7 +40,12 @@ export function CardFace({ card, view, count }: { card: Card; view: BoardView; c
         </span>
       )}
       <span className="card-title">{card.title}</span>
-      {(card.due || card.comments.length > 0 || card.assignees.length > 0 || card.desc || viewers.length > 0) && (
+      {(card.due ||
+        card.comments.length > 0 ||
+        card.attachments.length > 0 ||
+        card.assignees.length > 0 ||
+        card.desc ||
+        viewers.length > 0) && (
         <span className="card-meta">
           {viewers.length > 0 && (
             <span className="viewers" title={viewedBy} aria-label={viewedBy}>
@@ -62,6 +67,20 @@ export function CardFace({ card, view, count }: { card: Card; view: BoardView; c
           {card.comments.length > 0 && (
             <span className="comments" aria-label={t('nComments', { n: card.comments.length })}>
               {card.comments.length}
+            </span>
+          )}
+          {card.attachments.length > 0 && (
+            <span className="attached" aria-label={t('nAttachments', { n: card.attachments.length })}>
+              <svg width="11" height="13" viewBox="0 0 11 13" aria-hidden="true">
+                <path
+                  d="M8.5 6.2 5 9.7a2.1 2.1 0 0 1-3-3l4.1-4.1a1.4 1.4 0 0 1 2 2L4.3 8.4a.7.7 0 0 1-1-1l3.2-3.2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                />
+              </svg>
+              {card.attachments.length}
             </span>
           )}
           <span className="assignees">

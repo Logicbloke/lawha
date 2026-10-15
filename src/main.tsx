@@ -5,6 +5,7 @@ import { initApp, setOnReady } from './state/store'
 import { startNetwork } from './state/network'
 import { startLooking } from './state/looking'
 import { startNotifications } from './state/notify'
+import { startAttachments } from './state/attachments'
 import { registerServiceWorker } from './state/swUpdate'
 import './ui/styles.css'
 
@@ -19,6 +20,7 @@ setOnReady((engine) => {
   startNetwork(engine)
   startLooking(engine)
   startNotifications(engine)
+  startAttachments(engine)
 })
 void initApp()
 

@@ -51,6 +51,7 @@ export function startNetwork(engine: Engine): void {
       onPeer: (ch) => engine.sync.onPeerJoin(ch),
       onPeerGone: (key) => engine.sync.onPeerLeave(key),
       onMessage: (ch, action, payload) => void engine.sync.onMessage(ch, action, payload),
+      onPiece: (ch, data, meta) => void engine.sync.onPiece(ch, data, meta),
     },
     {
       strategies: env.VITE_STRATEGIES?.split(','),
