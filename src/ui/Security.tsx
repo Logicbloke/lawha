@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { exportIdentity } from '../core/identity'
+import { deviceCode } from '../state/devices'
 import { restartNetwork } from '../state/network'
-import { endSession, identityEncrypted, me, sessionExpiry, toast, useApp } from '../state/store'
+import { endSession, getEngine, identityEncrypted, me, sessionExpiry, toast, useApp } from '../state/store'
 import { isTurnUrl, loadTurn, saveTurn } from '../state/turn'
 import { useT } from './i18n'
 import { QrCode } from './QrCode'
@@ -46,6 +47,13 @@ export function Security() {
         ) : (
           <button onClick={() => setShowBackup(true)}>{t('secReveal')}</button>
         )}
+      </section>
+
+      <section className="panel">
+        <h2>{t('secDeviceTitle')}</h2>
+        <p>
+          {t('secDeviceBody')} <code dir="ltr">{deviceCode(getEngine().dev)}</code>
+        </p>
       </section>
 
       {encrypted && (

@@ -55,6 +55,13 @@ export interface EngineEvents {
    * (never on load, nor for history from before we joined the board)
    */
   activity: { board: string; before: BoardView; items: AppliedOp[] }
+  /**
+   * a board another install of our own key offered, taken up here: nobody
+   * chose it on this device, so its files can wait until opened
+   */
+  adopted: { board: string }
+  /** an install of our own key waits to be allowed our boards (see sync.waitingDevices()) */
+  'device-waiting': { dev: string }
 }
 
 export interface RoomSpec {
@@ -96,7 +103,22 @@ export class Engine {
    * bigger ones when opened. A local choice (state/attachments.ts sets it).
    */
   eagerLimit: (board: string) => number = () => DEFAULT_EAGER_BYTES
+  /**
+   * The room only this identity's installs can find: its id and password
+   * come from the key's seed. Every install joins it, so one that has just
+   * imported the key meets the others and takes up their boards over that
+   * connection (SyncManager.handleOffer). Its session is no board: nothing
+   * is served on it, and no other key may connect.
+   */
+  readonly self: RoomSpec
+  /**
+   * May this install of our own key (another device) be offered our boards?
+   * The person allows each one here the first time it connects
+   * (state/devices.ts); until then it gets only boards it names itself.
+   */
+  approvedDevice: (dev: string) => boolean = () => false
   private boards = new Map<string, BoardState>()
+  private adopting = new Set<string>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private healTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private local: Uint8Array
@@ -115,6 +137,9 @@ export class Engine {
       now: opts.now ?? (() => Date.now()),
     }
     this.local = localKey(identity)
+    const own = (label: string) => toB64url(hkdf(sha256, identity.seed, new Uint8Array(0), utf8(label), 32))
+    const selfId = own('lawha-self-room-v1')
+    this.self = { board: selfId, roomId: selfId, password: own('lawha-self-pass-v1') }
     const host: SyncHost = {
       db: () => this.getDb(),
       identity,
@@ -130,13 +155,19 @@ export class Engine {
         const st = this.boards.get(board)
         return !!st && !st.record.hidden && this.mayConnect(board, pub)
       },
+      adopt: (board, ws) => this.bg(this.adopt(board, ws)),
+      inviteWs: (board) => (this.boards.get(board)?.record.kind === 'workspace' ? board : this.wsOf(board)),
+      approvedDevice: (d) => d !== dev && this.approvedDevice(d),
+      onDeviceWaiting: (d) => this.events.emit('device-waiting', { dev: d }),
       onIngested: (board, msgs) => this.bg(this.ingested(board, msgs)),
       onFork: (board) => this.bg(this.reloadForks(board)),
       onOrphans: (board) => {
         const st = this.boards.get(board)
         if (st) this.bg(this.promoteOrphans(st))
       },
-      onPeerAuthed: (board, pub, member) => this.events.emit('peer-authed', { board, pub, member }),
+      onPeerAuthed: (board, pub, member) => {
+        if (board !== this.self.board) this.events.emit('peer-authed', { board, pub, member })
+      },
       onPresence: () => this.events.emit('presence', {}),
       onLooks: (board) => this.events.emit('looks', { board }),
       blobOf: (board, root) => this.view(board)?.blobs.get(root) ?? null,
@@ -258,6 +289,7 @@ export class Engine {
   }
 
   mayConnect(board: string, pub: string): boolean {
+    if (board === this.self.board) return pub === this.identity.pub
     const ws = this.wsOf(board)
     if (!ws || ws === board) return true
     const w = this.view(ws)
@@ -269,6 +301,7 @@ export class Engine {
    * network secret; without it (not on the roster) there is no room to join.
    */
   roomSpec(board: string): RoomSpec | null {
+    if (board === this.self.board) return this.self
     const ws = this.wsOf(board)
     const derive = (secret: Uint8Array, label: string) =>
       toB64url(hkdf(sha256, secret, fromB64url(board), utf8(label), 32))
@@ -320,6 +353,20 @@ export class Engine {
   /** Follow a board we were invited to (its logs arrive by sync). */
   async follow(board: string, ws: string | null): Promise<void> {
     await this.ensureBoard(board, ws === board ? 'workspace' : 'board', ws)
+    this.events.emit('boards-changed', {})
+  }
+
+  /** Take up a board another install of our key holds (its logs arrive over the connection that offered it). */
+  private async adopt(board: string, ws: string | null): Promise<void> {
+    if (board === this.self.board || this.boards.has(board) || this.adopting.has(board)) return
+    this.adopting.add(board)
+    try {
+      // before the board exists: its first fold already fetches files by this
+      this.events.emit('adopted', { board })
+      await this.ensureBoard(board, ws === board ? 'workspace' : 'board', ws)
+    } finally {
+      this.adopting.delete(board)
+    }
     this.events.emit('boards-changed', {})
   }
 

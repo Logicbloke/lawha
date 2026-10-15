@@ -3,7 +3,7 @@ import { randomBytes } from '@noble/hashes/utils.js'
 import { uniqueDbName } from './sim'
 import { fromB64url, toB64url } from '../src/core/b64'
 import { openLawhaDb, type LawhaDb } from '../src/core/db'
-import { Engine } from '../src/core/engine'
+import { DEFAULT_EAGER_BYTES, Engine } from '../src/core/engine'
 import { generateIdentity } from '../src/core/identity'
 import { attachOp, createBoardItems, newEntityId, opItem, removeItem, setRoleItem } from '../src/core/actions'
 import { PIECE_SIZE, openPiece, sealFile } from '../src/core/blobcrypto'
@@ -89,9 +89,9 @@ interface Node {
   pub: string
 }
 
-async function node(now?: () => number, id = generateIdentity()): Promise<Node> {
+async function node(now?: () => number, id = generateIdentity(), dev = toB64url(randomBytes(16))): Promise<Node> {
   const db = await openLawhaDb(uniqueDbName())
-  const e = new Engine(() => db, id, toB64url(randomBytes(16)), { debounceMs: 0, healDelay: { owner: 0, step: 10 }, now })
+  const e = new Engine(() => db, id, dev, { debounceMs: 0, healDelay: { owner: 0, step: 10 }, now })
   return { e, db, pub: id.pub }
 }
 
@@ -326,6 +326,123 @@ describe('shared boards over one connection', () => {
     await net.settle()
     expect(titles(x, b2)).toEqual(['still flows'])
     expect(titles(x, b1)).toEqual(['b1 too'])
+  })
+})
+
+describe('my other installs', () => {
+  it('one that has only imported the key meets the others in their private room and, once allowed, takes up every board', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const ws = await makeBoard(o, 'workspace')
+    const cb = await makeBoard(o, 'board', ws)
+    const pb = await makeBoard(o)
+    await addCard(o, cb, 'company card')
+    await addCard(o, pb, 'personal card')
+    const phone = await node(undefined, o.e.identity)
+    expect(phone.e.self).toEqual(o.e.self)
+    expect(phone.e.records()).toHaveLength(0)
+    const asked: string[] = []
+    o.e.events.on('device-waiting', ({ dev }) => asked.push(dev))
+    const adopted: string[] = []
+    phone.e.events.on('adopted', ({ board }) => adopted.push(board))
+
+    net.link(o.e, phone.e, o.e.self.board)
+    await net.settle()
+    // the key alone gets nothing until the person allows the device on the laptop
+    expect(phone.e.records()).toHaveLength(0)
+    expect(asked).toContain(phone.e.dev)
+    expect(o.e.sync.waitingDevices()).toEqual([phone.e.dev])
+
+    o.e.approvedDevice = (dev) => dev === phone.e.dev
+    o.e.sync.reoffer()
+    await net.settle()
+    expect(o.e.sync.waitingDevices()).toEqual([])
+    expect(adopted.sort()).toEqual([ws, cb, pb].sort())
+    // filled from the laptop, the phone has nothing to ask about it
+    expect(phone.e.sync.waitingDevices()).toEqual([])
+    expect(titles(phone, cb)).toEqual(['company card'])
+    expect(titles(phone, pb)).toEqual(['personal card'])
+    expect(phone.e.view(cb)!.myRole).toBe('owner')
+    // what each is and where it belongs, as on the device it came from
+    const kinds = (n: Node) => Object.fromEntries(n.e.records().map((r) => [r.id, [r.kind, n.e.wsOf(r.id)]]))
+    expect(kinds(phone)).toEqual(kinds(o))
+    expect(kinds(phone)[ws]![0]).toBe('workspace')
+    expect(phone.e.roomSpec(cb)).toEqual(o.e.roomSpec(cb))
+    expect(o.e.sync.installs()).toBe(1)
+
+    await addCard(phone, pb, 'from the phone')
+    await net.settle()
+    expect(titles(o, pb)).toEqual(['from the phone', 'personal card'])
+  })
+
+  it('no other key gets into the private room, nor anything out of it', async () => {
+    const net = new MockNet()
+    const o = await node()
+    await addCard(o, await makeBoard(o), 'mine')
+    const x = await node()
+    net.link(o.e, x.e, o.e.self.board) // as if the room id and password had leaked
+    await net.settle()
+    expect(o.e.sync.installs()).toBe(0)
+    expect(x.e.records()).toHaveLength(0)
+  })
+
+  it('a coworker\'s offer adds no board: only our own key\'s does', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const x = await node()
+    const b1 = await makeBoard(o)
+    const b2 = await makeBoard(o)
+    await grant(o, b1, x, 'editor')
+    await grant(o, b2, x, 'editor')
+    await x.e.follow(b1, null)
+    const adopt = vi.fn()
+    x.e.events.on('adopted', adopt)
+    net.link(o.e, x.e, b1)
+    await net.settle()
+    expect(x.e.records().map((r) => r.id)).toEqual([b1])
+    expect(adopt).not.toHaveBeenCalled()
+  })
+
+  it('until allowed, it gets only the boards it names itself', async () => {
+    const net = new MockNet()
+    const o = await node()
+    const b1 = await makeBoard(o)
+    await makeBoard(o) // only on the laptop
+    await addCard(o, b1, 'on b1')
+    const phone = await node(undefined, o.e.identity)
+    await phone.e.follow(b1, null) // opened its link
+    net.link(o.e, phone.e, b1)
+    net.link(o.e, phone.e, o.e.self.board)
+    await net.settle()
+    expect(titles(phone, b1)).toEqual(['on b1'])
+    expect(phone.e.records().map((r) => r.id)).toEqual([b1])
+    expect(o.e.sync.waitingDevices()).toEqual([phone.e.dev])
+  })
+
+  it('an install that claims this very device\'s id is never offered anything', async () => {
+    const net = new MockNet()
+    const o = await node()
+    o.e.approvedDevice = () => true
+    await makeBoard(o)
+    const twin = await node(undefined, o.e.identity, o.e.dev)
+    net.link(o.e, twin.e, o.e.self.board)
+    await net.settle()
+    expect(twin.e.records()).toHaveLength(0)
+  })
+
+  it('a board removed from one device\'s list stays off it', async () => {
+    const net = new MockNet()
+    const o = await node()
+    o.e.approvedDevice = () => true
+    const b = await makeBoard(o)
+    const phone = await node(undefined, o.e.identity)
+    const first = net.link(o.e, phone.e, o.e.self.board)
+    await net.settle()
+    await phone.e.setHidden(b, true)
+    net.unlink(first)
+    net.link(o.e, phone.e, o.e.self.board)
+    await net.settle()
+    expect(phone.e.records().map((r) => [r.id, r.hidden])).toEqual([[b, 1]])
   })
 })
 
@@ -777,6 +894,28 @@ describe('attachments', () => {
     net.link(o.e, x.e, b1)
     await settleAll(net, o, x)
     expect(await fileOf(x, at)).toEqual(data)
+  })
+
+  it('files of a board taken up from another of my devices wait until opened there', async () => {
+    const o = await node()
+    o.e.approvedDevice = () => true
+    const b = await makeBoard(o)
+    await addCard(o, b, 'c')
+    const at = await upload(o, b, [...o.e.view(b)!.cards.keys()][0]!, bytes(PIECE_SIZE + 1))
+    const phone = await node(undefined, o.e.identity)
+    // what state/store.ts does with the event
+    const limits = new Map<string, number>()
+    phone.e.eagerLimit = (board) => limits.get(board) ?? DEFAULT_EAGER_BYTES
+    phone.e.events.on('adopted', ({ board }) => limits.set(board, 0))
+    const net = new MockNet()
+    net.link(o.e, phone.e, o.e.self.board)
+    await settleAll(net, o, phone)
+    expect(phone.e.view(b)!.blobs.has(at.root)).toBe(true)
+    expect(await phone.e.blobs.record(at.root)).toBeNull()
+    const got = phone.e.swarm.want(b, at)
+    await settleAll(net, o, phone)
+    await got
+    expect(await phone.e.blobs.complete(at.root)).toBe(true)
   })
 
   it('an install from before attachments is never sent `bl` or a piece', async () => {

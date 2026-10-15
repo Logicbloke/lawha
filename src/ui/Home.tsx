@@ -3,6 +3,7 @@ import { getEngine, navigate, useApp } from '../state/store'
 import { createBoard } from '../state/actions'
 import { groupBoards, useGrouping } from '../state/categories'
 import { useBoardIds } from './hooks'
+import { deviceCode } from '../state/devices'
 import { useT } from './i18n'
 
 function BoardTile({ id }: { id: string }) {
@@ -51,6 +52,11 @@ export function Home() {
       <header className="home-head">
         <h1>{ws ? wsView?.name || t('unnamedWorkspace') : t('personalBoards')}</h1>
         <p className="lede">{ws ? t('homeCompanyLede') : t('homePersonalLede')}</p>
+        {engine.records().length === 0 && (
+          <p className="hint device-hint">
+            {t('deviceHomeHint')} <code dir="ltr">{deviceCode(engine.dev)}</code>
+          </p>
+        )}
       </header>
       <ul className="board-grid">
         {loose.map((id) => (

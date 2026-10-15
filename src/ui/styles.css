@@ -1933,6 +1933,37 @@ details.menu.add-entry > summary {
   font-size: 0.9rem;
   z-index: 60;
 }
+.device-requests {
+  position: fixed;
+  inset-block-start: 1rem;
+  inset-inline: 1rem;
+  margin-inline: auto;
+  max-width: 34rem;
+  display: grid;
+  gap: 0.5rem;
+  z-index: 60;
+}
+.device-request {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--slate);
+  border: 1px solid var(--amber);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lift);
+  font-size: 0.9rem;
+}
+.device-request p {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+.device-request code {
+  font-weight: 600;
+  white-space: nowrap;
+}
 .update-toast-close {
   border: 0;
   background: none;

@@ -127,6 +127,12 @@ by rendezvous hashing so people who share boards land in the same room at
 the same time. Once two installs are connected in any room, that connection
 also carries every other board the two share (each with its own handshake
 and membership gate), so coworkers stay in sync on boards neither has open.
+Your own devices also meet in a private room that only holders of your key
+can find, so a phone that has just restored the key finds your laptop with
+no board in common. The laptop asks you first, showing the phone's code
+(the phone shows it too, on its home screen and under Key & security), and
+once you allow it, the phone takes up every board you are on. Their files
+are fetched only when opened there, until you choose otherwise per board.
 The peer count in the sidebar counts people's devices, not connections; open
 it to see which discovery relays are reachable and whether direct connections
 are failing. Networks that block device-to-device connections (some office
@@ -179,6 +185,10 @@ Lawha does **not** defend against:
   reach about as far as the board's changes do.
 - **What a file says about you.** A photo's EXIF data (camera, sometimes GPS
   position) stays in it. Removed members keep the files they had fetched.
+- **A leaked key.** Whoever has your key is you on every board you are on.
+  Your devices ask before sharing your boards with a device they have not
+  seen, so the key alone does not list them, but someone who also knows a
+  board's id, or one of your devices' ids, gets that board's contents.
 - **Endpoint compromise.** The key lives in the browser. Malware, a hostile
   extension or an XSS hole can take it. Mitigations: strict CSP, all user
   content rendered as text, passphrase encryption at rest.

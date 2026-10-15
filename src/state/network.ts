@@ -7,6 +7,8 @@ import { iceServers } from './turn'
  * Which board rooms to be in. Every joined room costs relay subscriptions
  * (and tracker announces for torrent), so join lazily:
  *   - the open board (all strategies) and its company workspace
+ *   - the private room of our own installs (Engine.self): a device that has
+ *     just imported the key holds no board, and meets the others only there
  *   - every company workspace we are on: coworkers meet there, and that
  *     connection carries every board they share (see sync.ts)
  *   - boards written to in the last 10 minutes (so writes get out)
@@ -100,6 +102,7 @@ export function startNetwork(engine: Engine): void {
       add(st.route.id)
       add(engine.wsOf(st.route.id))
     }
+    add(engine.self.board)
     add(st.ws)
     for (const r of engine.records()) {
       if (r.kind !== 'workspace' || r.hidden) continue

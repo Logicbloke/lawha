@@ -6,6 +6,7 @@ import { startNetwork } from './state/network'
 import { startLooking } from './state/looking'
 import { startNotifications } from './state/notify'
 import { startAttachments } from './state/attachments'
+import { startDevices } from './state/devices'
 import { registerServiceWorker } from './state/swUpdate'
 import './ui/styles.css'
 
@@ -17,6 +18,7 @@ if (window.self !== window.top) {
 }
 
 setOnReady((engine) => {
+  startDevices(engine)
   startNetwork(engine)
   startLooking(engine)
   startNotifications(engine)

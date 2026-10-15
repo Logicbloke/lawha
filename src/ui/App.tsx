@@ -10,6 +10,7 @@ import { Contacts } from './Contacts'
 import { JoinBoard } from './JoinBoard'
 import { Security } from './Security'
 import { UpdateBanner } from './UpdateBanner'
+import { DeviceRequests } from './DeviceRequests'
 import { UpdateToast } from './UpdateToast'
 import { Toasts } from './Toasts'
 
@@ -93,6 +94,7 @@ export function App() {
       </main>
       <Toasts />
       <UpdateToast />
+      <DeviceRequests />
     </div>
   )
 }

@@ -23,6 +23,11 @@ import type { AclContent, Envelope, ForkRecord, Identity, StoredMessage } from '
  * two share: one connection per remote install (its "carrier") offers the
  * boards whose ACL names them, and each accepted board runs its own session
  * (own handshake, own gate) wrapped in `mux` messages over that connection.
+ * An install of our own key (another device, met in the private room only
+ * our installs can find: Engine.self) offers every board we are on, with
+ * the workspace an invite would name; boards we do not hold yet we take up.
+ * We offer ours to such an install only once the person allowed it on this
+ * device: until then the key alone, without any board id, gets nothing.
  *
  * `look` says which card someone has open, for the "also viewing" marks. It
  * is never signed or stored: it lives on live connections between current
@@ -84,6 +89,14 @@ export interface SyncHost {
   shareable(pub: string): string[]
   /** take up a board this key offers: we hold it and its room would let them in */
   accepts(board: string, pub: string): boolean
+  /** another install of our own key offered a board we do not hold: follow it (`accepts` once held) */
+  adopt?(board: string, ws: string | null): void
+  /** the workspace an invite to this board names: itself for a workspace, null for a personal board */
+  inviteWs?(board: string): string | null
+  /** may this install of our own key be offered our boards (the person allowed it here) */
+  approvedDevice?(dev: string): boolean
+  /** an install of our own key is waiting to be allowed (see waitingDevices()) */
+  onDeviceWaiting?(dev: string): void
   onIngested(board: string, msgs: StoredMessage[]): void
   onFork(board: string, fork: ForkRecord): void
   onOrphans?(board: string): void
@@ -345,20 +358,53 @@ export class SyncManager {
 
   // ---- shared boards over one connection ----
 
-  /** Offer, over a carrier, every shared board no session with that install covers yet. */
-  private offer(carrier: PeerState): void {
+  /** Every shared board no session with the carrier's install covers yet. */
+  private toOffer(carrier: PeerState): string[] {
     const who = installOf(carrier)
-    if (!who || carrier.via) return
+    if (!who || carrier.via) return []
     const covered = new Set<string>()
     for (const p of this.peers.values()) {
       if ((p.via ? installOf(this.peers.get(p.via)) : installOf(p)) === who) covered.add(p.ch.board)
     }
-    const boards = this.host
+    return this.host
       .shareable(carrier.pub!)
       .filter((b) => !covered.has(b))
       .slice(0, MAX_OFFER)
+  }
+
+  private waits(carrier: PeerState): boolean {
+    return carrier.pub === this.host.identity.pub && !this.host.approvedDevice?.(carrier.dev!)
+  }
+
+  /** Installs of our own key connected now that we would offer boards to once the person allows them. */
+  waitingDevices(): string[] {
+    const devs = new Set<string>()
+    for (const key of this.carriers.values()) {
+      const carrier = this.peers.get(key)
+      if (carrier && this.waits(carrier) && this.toOffer(carrier).length > 0) devs.add(carrier.dev!)
+    }
+    return [...devs]
+  }
+
+  /** Offer, over a carrier, every shared board no session with that install covers yet. */
+  private offer(carrier: PeerState): void {
+    const boards = this.toOffer(carrier)
     if (boards.length === 0) return
-    carrier.ch.send('offer', { boards })
+    if (this.waits(carrier)) {
+      this.host.onDeviceWaiting?.(carrier.dev!)
+      return
+    }
+    if (carrier.pub === this.host.identity.pub) {
+      // our own install may not hold them yet: what it needs to follow them
+      const ws: Record<string, string> = {}
+      for (const b of boards) {
+        const w = this.host.inviteWs?.(b)
+        if (w) ws[b] = w
+      }
+      carrier.ch.send('offer', { boards, ws })
+    } else {
+      carrier.ch.send('offer', { boards })
+    }
     for (const b of boards) this.openCarried(carrier, b)
   }
 
@@ -379,11 +425,21 @@ export class SyncManager {
 
   private handleOffer(base: PeerState, p: unknown): void {
     if (base.via || !isObj(p) || !Array.isArray(p.boards)) return
+    // another install of ours: the boards it is on are ours to hold too
+    const mine = base.pub === this.host.identity.pub
+    const ws = isObj(p.ws) ? p.ws : {}
     const declined = this.declined.get(base.ch.key) ?? new Set<string>()
     for (const b of p.boards.slice(0, MAX_OFFER)) {
       if (!isB64(b, B64_32) || b === base.ch.board || this.peers.has(carriedKey(base.ch.key, b))) continue
-      if (this.host.accepts(b, base.pub!)) this.openCarried(base, b)
-      else if (declined.size < MAX_OFFER) declined.add(b)
+      if (this.host.accepts(b, base.pub!)) {
+        this.openCarried(base, b)
+        continue
+      }
+      // taken up by reoffer() once held (and, for a company board, once its roster names us)
+      if (declined.size < MAX_OFFER) declined.add(b)
+      if (!mine) continue
+      const w = ws[b]
+      this.host.adopt?.(b, isB64(w, B64_32) ? w : null)
     }
     if (declined.size > 0) this.declined.set(base.ch.key, declined)
   }
